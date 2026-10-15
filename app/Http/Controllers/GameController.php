@@ -10,17 +10,21 @@ class GameController extends Controller
 {
     public function index(Request $request): View
     {
-        $leaderboard = Score::with('user:id,name')
-            ->orderByDesc('score')
-            ->orderBy('created_at')
-            ->limit(10)
-            ->get();
+        $leaderboards = [];
+        foreach (Score::MODES as $mode) {
+            $leaderboards[$mode] = Score::with('user:id,name')
+                ->ranked($mode)
+                ->limit(10)
+                ->get();
+        }
 
-        $best = null;
+        $bests = array_fill_keys(Score::MODES, null);
         $stats = null;
 
         if ($user = $request->user()) {
-            $best = $user->scores()->orderByDesc('score')->first();
+            foreach (Score::MODES as $mode) {
+                $bests[$mode] = $user->scores()->ranked($mode)->first();
+            }
             $row = $user->scores()
                 ->selectRaw('count(*) as games, coalesce(sum(lines), 0) as lines, coalesce(max(level), 1) as level, coalesce(avg(score), 0) as average')
                 ->first();
@@ -33,8 +37,8 @@ class GameController extends Controller
         }
 
         return view('tetris', [
-            'leaderboard' => $leaderboard,
-            'best' => $best,
+            'leaderboards' => $leaderboards,
+            'bests' => $bests,
             'stats' => $stats,
         ]);
     }
