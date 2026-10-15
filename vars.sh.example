@@ -1,0 +1,34 @@
+#!/bin/bash
+#================================================================
+# Settings for cx.sh (the LOCAL assistant). Copy to vars.sh and fill in:
+#
+#   cp vars.sh.example vars.sh
+#
+# vars.sh is gitignored — it names hosts and accounts, so it stays out of
+# the repo. This example carries placeholders only.
+#================================================================
+
+# --- Identity ------------------------------------------------------------
+PROJECT="nq-tetris"                  # project name, used in logs and paths
+REMOTE_USER="your-ssh-user"
+REMOTE_HOST="your-host.example.com"
+REMOTE="$REMOTE_USER@$REMOTE_HOST"
+REMOTE_PORT="22"                     # SiteGround uses 18765
+
+# App root on the server, relative to ~. artisan, .env, storage/ and
+# public_html/ live here. The web server's document root must point at
+# $REMOTE_APP/public_html.
+REMOTE_APP="www/$PROJECT"
+
+# What option 30 health-checks. Public URL, so the check covers DNS and TLS
+# as well as PHP.
+APP_URL="https://tetris.example.com"
+
+# --- Tooling -------------------------------------------------------------
+# Kept as variables so you can add flags once (e.g. -i KEY).
+APP_SSH="ssh -p $REMOTE_PORT"
+APP_SCP="scp -P $REMOTE_PORT"
+
+# --- Local paths ---------------------------------------------------------
+# Appended to by options that tee remote output.
+LOG_OUTPUT="./log/remote.out"
