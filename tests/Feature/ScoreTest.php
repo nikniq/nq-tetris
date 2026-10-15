@@ -59,4 +59,19 @@ class ScoreTest extends TestCase
             ->assertOk()
             ->assertSee('id="best">4500', false);
     }
+
+    public function test_home_shows_personal_stats_for_logged_in_player(): void
+    {
+        $user = User::factory()->create();
+        Score::create(['user_id' => $user->id, 'score' => 1000, 'lines' => 10, 'level' => 2]);
+        Score::create(['user_id' => $user->id, 'score' => 3000, 'lines' => 25, 'level' => 3]);
+
+        $this->actingAs($user)->get('/')
+            ->assertOk()
+            ->assertSee('Your stats')
+            ->assertSeeInOrder(['Games', '2', 'Total lines', '35', 'Top level', '3', 'Average', '2,000']);
+
+        auth()->logout();
+        $this->get('/')->assertOk()->assertDontSee('Your stats');
+    }
 }

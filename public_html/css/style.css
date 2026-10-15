@@ -253,3 +253,64 @@ button.secondary:hover { background: #4a525d; }
   .panel.keys { display: none; }
   #sidebar { width: 100%; }
 }
+
+/* ---- combo toast ---- */
+.combo {
+  position: absolute;
+  top: 38%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-weight: bold;
+  font-size: 1.1rem;
+  color: var(--accent);
+  text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none;
+}
+.combo.show { opacity: 1; transform: translateY(0); }
+
+button.small { padding: 6px 12px; font-size: 0.85rem; margin: 8px 0 0; }
+
+.panel.mystats { margin-top: 16px; }
+.panel.mystats dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 0.9rem;
+}
+.panel.mystats dt { color: var(--muted); }
+.panel.mystats dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+
+/* ---- touch controls (only on devices without a fine pointer) ---- */
+#touch { display: none; }
+@media (pointer: coarse) {
+  #touch {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    max-width: 420px;
+    margin: 16px auto 0;
+    padding: 0 8px;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+  #touch .row { display: flex; gap: 8px; }
+  #touch button {
+    flex: 1;
+    margin: 0;
+    padding: 18px 0;
+    font-size: 1.3rem;
+    background: #3a414b;
+    color: var(--text);
+    touch-action: none;
+  }
+  #touch button.active { background: var(--accent); color: var(--panel); }
+  main { flex-direction: column; align-items: center; }
+  #tetris { touch-action: none; }
+}

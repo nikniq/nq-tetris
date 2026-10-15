@@ -23,12 +23,14 @@
           <dt>Space</dt><dd>Hard drop</dd>
           <dt>C</dt><dd>Hold</dd>
           <dt>P</dt><dd>Pause</dd>
+          <dt>M</dt><dd>Mute</dd>
         </dl>
       </div>
     </div>
 
     <div id="board-wrap">
       <canvas id="tetris" width="320" height="640"></canvas>
+      <div id="combo" class="combo" aria-live="polite"></div>
       <div id="overlay" class="overlay">
         <div class="overlay-box">
           <h2 id="overlay-title">TETRIS</h2>
@@ -50,6 +52,7 @@
         <button id="start-btn" type="button">Start</button>
         <button id="pause-btn" type="button" class="secondary">Pause</button>
       </div>
+      <button id="mute-btn" type="button" class="secondary small" aria-pressed="false">🔊 Sound on</button>
 
       @guest
         <p class="hint">
@@ -58,6 +61,18 @@
         </p>
       @endguest
       <p id="save-status" class="hint" aria-live="polite"></p>
+
+      @auth
+        <div class="panel mystats">
+          <h2>Your stats</h2>
+          <dl>
+            <dt>Games</dt><dd>{{ number_format($stats['games']) }}</dd>
+            <dt>Total lines</dt><dd>{{ number_format($stats['lines']) }}</dd>
+            <dt>Top level</dt><dd>{{ $stats['level'] }}</dd>
+            <dt>Average</dt><dd>{{ number_format($stats['average']) }}</dd>
+          </dl>
+        </div>
+      @endauth
 
       <div class="panel leaderboard">
         <h2>Top 10</h2>
@@ -74,6 +89,20 @@
           </ol>
         @endif
       </div>
+    </div>
+  </div>
+
+  <div id="touch" aria-label="Touch controls">
+    <div class="row">
+      <button type="button" data-action="hold">Hold</button>
+      <button type="button" data-action="ccw">↺</button>
+      <button type="button" data-action="cw">↻</button>
+      <button type="button" data-action="drop">Drop</button>
+    </div>
+    <div class="row">
+      <button type="button" data-action="left">◀</button>
+      <button type="button" data-action="down">▼</button>
+      <button type="button" data-action="right">▶</button>
     </div>
   </div>
 @endsection

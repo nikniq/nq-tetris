@@ -1,23 +1,25 @@
 // Tetris game logic and rendering
 (() => {
-  const canvas = document.getElementById('tetris');
-  const ctx = canvas.getContext('2d');
-  const holdCanvas = document.getElementById('hold');
-  const holdCtx = holdCanvas.getContext('2d');
-  const nextCanvas = document.getElementById('next');
-  const nextCtx = nextCanvas.getContext('2d');
+  const $ = id => document.getElementById(id);
 
-  const scoreElem = document.getElementById('score');
-  const linesElem = document.getElementById('lines');
-  const levelElem = document.getElementById('level');
-  const bestElem = document.getElementById('best');
-  const saveStatus = document.getElementById('save-status');
-  const startBtn = document.getElementById('start-btn');
-  const pauseBtn = document.getElementById('pause-btn');
-  const overlay = document.getElementById('overlay');
-  const overlayTitle = document.getElementById('overlay-title');
-  const overlayText = document.getElementById('overlay-text');
-  const overlayBtn = document.getElementById('overlay-btn');
+  const canvas = $('tetris');
+  const ctx = canvas.getContext('2d');
+  const holdCtx = $('hold').getContext('2d');
+  const nextCtx = $('next').getContext('2d');
+
+  const scoreElem = $('score');
+  const linesElem = $('lines');
+  const levelElem = $('level');
+  const bestElem = $('best');
+  const saveStatus = $('save-status');
+  const startBtn = $('start-btn');
+  const pauseBtn = $('pause-btn');
+  const muteBtn = $('mute-btn');
+  const overlay = $('overlay');
+  const overlayTitle = $('overlay-title');
+  const overlayText = $('overlay-text');
+  const overlayBtn = $('overlay-btn');
+  const comboElem = $('combo');
 
   const CONFIG = window.TETRIS || { authenticated: false };
 
@@ -27,6 +29,14 @@
   const PREVIEW_BLOCK = 24;
   const LINES_PER_LEVEL = 10;
   const LINE_SCORES = [0, 100, 300, 500, 800]; // 0..4 lines, scaled by level
+
+  // Feel
+  const DAS = 170;          // ms before a held left/right starts repeating
+  const ARR = 40;           // ms between repeats once it has started
+  const SOFT_DROP_RATE = 45;
+  const LOCK_DELAY = 500;   // ms a piece can rest before it locks
+  const LOCK_RESETS = 15;   // moves/rotates that may postpone the lock
+  const CLEAR_FLASH = 220;  // ms the cleared rows flash before collapsing
 
   const COLORS = [
     null,
@@ -78,16 +88,76 @@
     ], // Z
   ];
 
+  // ---- sound (synthesised, no files to load) ----
+  const sound = (() => {
+    let actx = null;
+    let muted = false;
+    try { muted = localStorage.getItem('tetris.muted') === '1'; } catch (_) {}
+
+    function ensure() {
+      if (!actx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return null;
+        actx = new AC();
+      }
+      if (actx.state === 'suspended') actx.resume();
+      return actx;
+    }
+
+    function tone(freq, dur, type = 'square', gain = 0.05, slide = 0) {
+      if (muted) return;
+      const a = ensure();
+      if (!a) return;
+      const osc = a.createOscillator();
+      const g = a.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, a.currentTime);
+      if (slide) osc.frequency.exponentialRampToValueAtTime(Math.max(30, freq + slide), a.currentTime + dur);
+      g.gain.setValueAtTime(gain, a.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
+      osc.connect(g).connect(a.destination);
+      osc.start();
+      osc.stop(a.currentTime + dur);
+    }
+
+    return {
+      move:   () => tone(220, 0.04, 'square', 0.03),
+      rotate: () => tone(330, 0.05, 'triangle', 0.04),
+      lock:   () => tone(140, 0.08, 'square', 0.05, -60),
+      drop:   () => tone(110, 0.1, 'sawtooth', 0.05, -70),
+      hold:   () => tone(440, 0.06, 'triangle', 0.04),
+      clear:  n => { for (let i = 0; i < n; i++) setTimeout(() => tone(520 + i * 120, 0.12, 'square', 0.05), i * 60); },
+      tetris: () => { [660, 880, 1100, 1320].forEach((f, i) => setTimeout(() => tone(f, 0.14, 'square', 0.06), i * 70)); },
+      level:  () => { [523, 659, 784].forEach((f, i) => setTimeout(() => tone(f, 0.12, 'triangle', 0.06), i * 90)); },
+      over:   () => { [400, 300, 200, 120].forEach((f, i) => setTimeout(() => tone(f, 0.25, 'sawtooth', 0.06, -40), i * 160)); },
+      unlock: ensure,
+      get muted() { return muted; },
+      toggle() {
+        muted = !muted;
+        try { localStorage.setItem('tetris.muted', muted ? '1' : '0'); } catch (_) {}
+        return muted;
+      },
+    };
+  })();
+
   // ---- state ----
   let board, piece, nextPiece, holdPiece, holdUsed;
-  let score, lines, level;
+  let score, lines, level, combo, backToBack;
   let running = false;   // a game is in progress (may be paused)
   let paused = false;
   let gameOver = false;
+  let clearing = null;   // { rows: [...], until: ts } while rows flash
   let dropCounter = 0;
   let lastTime = 0;
   let bag = [];
+  let lockTimer = 0;     // ms the piece has rested on something
+  let lockResets = 0;
   let best = parseInt(bestElem.textContent.replace(/\D/g, ''), 10) || 0;
+
+  // Guests keep a best score in this browser; players get theirs from the server.
+  if (!CONFIG.authenticated) {
+    try { best = Math.max(best, parseInt(localStorage.getItem('tetris.best') || '0', 10) || 0); } catch (_) {}
+  }
 
   // ---- helpers ----
   function createMatrix(w, h) {
@@ -127,7 +197,7 @@
   function merge(board, piece) {
     piece.shape.forEach((row, y) => {
       row.forEach((value, x) => {
-        if (value) board[y + piece.y][x + piece.x] = value;
+        if (value && y + piece.y >= 0) board[y + piece.y][x + piece.x] = value;
       });
     });
   }
@@ -145,25 +215,53 @@
     return false;
   }
 
+  function grounded() {
+    piece.y++;
+    const g = collide(board, piece);
+    piece.y--;
+    return g;
+  }
+
   function rotateMatrix(matrix, dir) {
     const rotated = matrix[0].map((_, i) => matrix.map(row => row[i]));
     return dir > 0 ? rotated.map(row => row.reverse()) : rotated.reverse();
   }
 
+  // A successful move or rotate while resting gives the player a little more
+  // time, up to a cap so a piece can't be kept alive forever.
+  function touchLock() {
+    if (grounded() && lockResets < LOCK_RESETS) {
+      lockTimer = 0;
+      lockResets++;
+    }
+  }
+
   // Rotate with simple wall kicks: try in place, then one or two cells
-  // either side, so pieces against a wall still turn.
+  // either side, then one up, so pieces against a wall or floor still turn.
   function rotatePiece(dir) {
+    if (piece.typeId === 4) return; // O never changes
     const rotated = rotateMatrix(piece.shape, dir);
-    const kicks = [0, -1, 1, -2, 2];
+    const kicks = [[0,0], [-1,0], [1,0], [-2,0], [2,0], [0,-1], [-1,-1], [1,-1]];
     const original = piece.shape;
-    const originalX = piece.x;
+    const ox = piece.x, oy = piece.y;
     piece.shape = rotated;
-    for (const k of kicks) {
-      piece.x = originalX + k;
-      if (!collide(board, piece)) return;
+    for (const [kx, ky] of kicks) {
+      piece.x = ox + kx;
+      piece.y = oy + ky;
+      if (!collide(board, piece)) { sound.rotate(); touchLock(); return true; }
     }
     piece.shape = original;
-    piece.x = originalX;
+    piece.x = ox;
+    piece.y = oy;
+    return false;
+  }
+
+  function move(dx) {
+    piece.x += dx;
+    if (collide(board, piece)) { piece.x -= dx; return false; }
+    sound.move();
+    touchLock();
+    return true;
   }
 
   function ghostY() {
@@ -180,7 +278,6 @@
     c.strokeStyle = '#23272e';
     c.lineWidth = 1;
     c.strokeRect(x * size + 0.5, y * size + 0.5, size - 1, size - 1);
-    // small highlight for a bevelled look
     c.fillStyle = 'rgba(255,255,255,0.18)';
     c.fillRect(x * size + 2, y * size + 2, size - 4, 3);
     c.globalAlpha = 1;
@@ -211,11 +308,11 @@
     }
   }
 
-  function drawPreview(c, cv, p) {
+  function drawPreview(c, p) {
+    const cv = c.canvas;
     c.fillStyle = '#111';
     c.fillRect(0, 0, cv.width, cv.height);
     if (!p) return;
-    // trim empty rows/cols so the piece sits centred
     const rows = p.shape.filter(r => r.some(v => v));
     const cols = p.shape[0].map((_, i) => p.shape.some(r => r[i])).reduce((a, v, i) => (v ? a.concat(i) : a), []);
     const w = cols.length, h = rows.length;
@@ -224,17 +321,26 @@
     drawMatrix(c, p.shape, { x: offX, y: offY }, PREVIEW_BLOCK);
   }
 
-  function draw() {
+  function draw(now = performance.now()) {
     ctx.fillStyle = '#111';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     drawGrid();
     drawMatrix(ctx, board, { x: 0, y: 0 }, BLOCK_SIZE);
-    if (piece && running) {
+
+    if (clearing) {
+      // Flash the full rows white/transparent at ~12Hz until they collapse.
+      const on = Math.floor((clearing.until - now) / 40) % 2 === 0;
+      ctx.fillStyle = on ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.25)';
+      for (const y of clearing.rows) ctx.fillRect(0, y * BLOCK_SIZE, canvas.width, BLOCK_SIZE);
+    } else if (piece && running) {
       drawMatrix(ctx, piece.shape, { x: piece.x, y: ghostY() }, BLOCK_SIZE, 0.22);
-      drawMatrix(ctx, piece.shape, { x: piece.x, y: piece.y }, BLOCK_SIZE);
+      // Fade slightly as the lock timer runs down so the player can feel it.
+      const alpha = grounded() ? 1 - 0.35 * (lockTimer / LOCK_DELAY) : 1;
+      drawMatrix(ctx, piece.shape, { x: piece.x, y: piece.y }, BLOCK_SIZE, alpha);
     }
-    drawPreview(nextCtx, nextCanvas, nextPiece);
-    drawPreview(holdCtx, holdCanvas, holdPiece);
+
+    drawPreview(nextCtx, nextPiece);
+    drawPreview(holdCtx, holdPiece);
   }
 
   function updateHud() {
@@ -242,6 +348,14 @@
     linesElem.textContent = lines;
     levelElem.textContent = level;
     bestElem.textContent = Math.max(best, score).toLocaleString();
+  }
+
+  let comboTimer = null;
+  function flashCombo(text) {
+    comboElem.textContent = text;
+    comboElem.classList.add('show');
+    clearTimeout(comboTimer);
+    comboTimer = setTimeout(() => comboElem.classList.remove('show'), 1200);
   }
 
   function showOverlay(title, text, btnLabel) {
@@ -260,51 +374,82 @@
     piece = nextPiece;
     nextPiece = makePiece(nextTypeId());
     holdUsed = false;
+    lockTimer = 0;
+    lockResets = 0;
+    dropCounter = 0;
     if (collide(board, piece)) endGame();
+  }
+
+  function fullRows() {
+    const rows = [];
+    for (let y = 0; y < ROWS; y++) if (board[y].every(v => v !== 0)) rows.push(y);
+    return rows;
   }
 
   function lockPiece() {
     merge(board, piece);
-    const cleared = sweep();
-    if (cleared) {
-      lines += cleared;
-      score += LINE_SCORES[cleared] * level;
-      level = Math.floor(lines / LINES_PER_LEVEL) + 1;
+    const rows = fullRows();
+    if (rows.length === 0) {
+      sound.lock();
+      combo = -1;
+      spawn();
+      return;
     }
-    updateHud();
-    spawn();
-    dropCounter = 0;
+    // Rows flash first; the score and the next piece wait for collapse.
+    clearing = { rows, until: performance.now() + CLEAR_FLASH };
+    piece = null;
+    if (rows.length === 4) sound.tetris(); else sound.clear(rows.length);
   }
 
-  function sweep() {
-    let cleared = 0;
-    for (let y = ROWS - 1; y >= 0; --y) {
-      if (board[y].every(v => v !== 0)) {
-        board.splice(y, 1);
-        board.unshift(new Array(COLS).fill(0));
-        cleared++;
-        y++;
-      }
+  function finishClear() {
+    const n = clearing.rows.length;
+    for (const y of clearing.rows) {
+      board.splice(y, 1);
+      board.unshift(new Array(COLS).fill(0));
     }
-    return cleared;
+    clearing = null;
+
+    combo++;
+    lines += n;
+    let gained = LINE_SCORES[n] * level;
+    const notes = [];
+    if (n === 4) {
+      if (backToBack) { gained = Math.floor(gained * 1.5); notes.push('Back-to-back'); }
+      notes.push('TETRIS');
+      backToBack = true;
+    } else {
+      backToBack = false;
+    }
+    if (combo > 0) {
+      gained += 50 * combo * level;
+      notes.push(`Combo ×${combo + 1}`);
+    }
+    score += gained;
+    const newLevel = Math.floor(lines / LINES_PER_LEVEL) + 1;
+    if (newLevel > level) { level = newLevel; notes.push(`Level ${level}`); sound.level(); }
+    if (notes.length) flashCombo(notes.join(' · ') + `  +${gained.toLocaleString()}`);
+
+    updateHud();
+    spawn();
   }
 
   function softDrop() {
     piece.y++;
     if (collide(board, piece)) {
       piece.y--;
-      lockPiece();
-    } else {
-      score += 1;
-      updateHud();
+      return false;
     }
+    score += 1;
+    updateHud();
     dropCounter = 0;
+    return true;
   }
 
   function hardDrop() {
     const target = ghostY();
     score += (target - piece.y) * 2;
     piece.y = target;
+    sound.drop();
     lockPiece();
   }
 
@@ -320,36 +465,50 @@
       nextPiece = makePiece(nextTypeId());
     }
     holdUsed = true;
+    lockTimer = 0;
+    lockResets = 0;
+    sound.hold();
     if (collide(board, piece)) endGame();
-  }
-
-  function gravity() {
-    piece.y++;
-    if (collide(board, piece)) {
-      piece.y--;
-      lockPiece();
-    }
-    dropCounter = 0;
   }
 
   function update(time = 0) {
     if (!running || paused) return;
-    const delta = time - lastTime;
+    const delta = Math.min(time - lastTime, 100); // cap so a hiccup doesn't teleport the piece
     lastTime = time;
-    dropCounter += delta;
-    if (dropCounter > dropIntervalFor(level)) gravity();
-    draw();
+
+    if (clearing) {
+      if (time >= clearing.until) finishClear();
+    } else {
+      handleHeldKeys(delta);
+      if (grounded()) {
+        lockTimer += delta;
+        if (lockTimer >= LOCK_DELAY) { lockPiece(); }
+      } else {
+        lockTimer = 0;
+        dropCounter += delta;
+        if (dropCounter > dropIntervalFor(level)) {
+          piece.y++;
+          dropCounter = 0;
+        }
+      }
+    }
+
+    draw(time);
     requestAnimationFrame(update);
   }
 
   function startGame() {
+    sound.unlock();
     board = createMatrix(COLS, ROWS);
     bag = [];
     score = 0;
     lines = 0;
     level = 1;
+    combo = -1;
+    backToBack = false;
     holdPiece = null;
     holdUsed = false;
+    clearing = null;
     gameOver = false;
     paused = false;
     running = true;
@@ -361,7 +520,6 @@
     hideOverlay();
     pauseBtn.textContent = 'Pause';
     lastTime = performance.now();
-    dropCounter = 0;
     requestAnimationFrame(update);
   }
 
@@ -381,9 +539,14 @@
   function endGame() {
     running = false;
     gameOver = true;
+    held.clear();
     draw();
+    sound.over();
     const isBest = score > best;
-    if (isBest) best = score;
+    if (isBest) {
+      best = score;
+      if (!CONFIG.authenticated) { try { localStorage.setItem('tetris.best', String(best)); } catch (_) {} }
+    }
     updateHud();
     showOverlay(
       'GAME OVER',
@@ -395,7 +558,7 @@
 
   async function submitScore() {
     if (!CONFIG.authenticated) {
-      saveStatus.textContent = 'Log in to save this score.';
+      saveStatus.textContent = 'Log in to save this score to the leaderboard.';
       return;
     }
     if (score === 0) return;
@@ -424,18 +587,64 @@
     }
   }
 
-  // ---- input ----
-  startBtn.onclick = startGame;
-  pauseBtn.onclick = togglePause;
-  overlayBtn.onclick = () => {
-    if (paused) togglePause();
-    else startGame();
+  // ---- input: held keys with DAS/ARR ----
+  // Each entry: { action, elapsed, repeating }
+  const held = new Map();
+
+  function press(action) {
+    if (!running || paused || clearing || !piece) return;
+    switch (action) {
+      case 'left':  move(-1); break;
+      case 'right': move(1); break;
+      case 'down':  softDrop(); break;
+      case 'cw':    rotatePiece(1); break;
+      case 'ccw':   rotatePiece(-1); break;
+      case 'drop':  hardDrop(); break;
+      case 'hold':  hold(); break;
+      default: return;
+    }
+    draw();
+  }
+
+  function startHold(action) {
+    if (held.has(action)) return;
+    held.set(action, { elapsed: 0, repeating: false });
+    press(action);
+  }
+
+  function endHold(action) {
+    held.delete(action);
+  }
+
+  function handleHeldKeys(delta) {
+    for (const [action, h] of held) {
+      if (action !== 'left' && action !== 'right' && action !== 'down') continue;
+      h.elapsed += delta;
+      const start = action === 'down' ? 0 : DAS;
+      const rate = action === 'down' ? SOFT_DROP_RATE : ARR;
+      if (!h.repeating) {
+        if (h.elapsed >= start) { h.repeating = true; h.elapsed = 0; }
+        else continue;
+      }
+      while (h.elapsed >= rate) {
+        h.elapsed -= rate;
+        if (action === 'down') softDrop(); else move(action === 'left' ? -1 : 1);
+      }
+    }
+  }
+
+  const KEYMAP = {
+    ArrowLeft: 'left', ArrowRight: 'right', ArrowDown: 'down',
+    ArrowUp: 'cw', x: 'cw', X: 'cw',
+    z: 'ccw', Z: 'ccw',
+    ' ': 'drop',
+    c: 'hold', C: 'hold', Shift: 'hold',
   };
 
   document.addEventListener('keydown', e => {
-    // don't fight with form inputs on the page
-    if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
-
+    if (e.target && /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(e.target.tagName) && e.key !== 'Escape') {
+      if (e.target.tagName !== 'BUTTON') return;
+    }
     if (e.key === 'Enter' && (!running || gameOver)) {
       e.preventDefault();
       startGame();
@@ -446,43 +655,78 @@
       togglePause();
       return;
     }
-    if (!running || paused) return;
-
-    switch (e.key) {
-      case 'ArrowLeft':
-        piece.x--;
-        if (collide(board, piece)) piece.x++;
-        break;
-      case 'ArrowRight':
-        piece.x++;
-        if (collide(board, piece)) piece.x--;
-        break;
-      case 'ArrowDown':
-        softDrop();
-        break;
-      case 'ArrowUp':
-      case 'x':
-      case 'X':
-        rotatePiece(1);
-        break;
-      case 'z':
-      case 'Z':
-        rotatePiece(-1);
-        break;
-      case ' ':
-        hardDrop();
-        break;
-      case 'c':
-      case 'C':
-      case 'Shift':
-        hold();
-        break;
-      default:
-        return;
+    if (e.key === 'm' || e.key === 'M') {
+      e.preventDefault();
+      setMuteLabel(sound.toggle());
+      return;
     }
+    const action = KEYMAP[e.key];
+    if (!action) return;
     e.preventDefault();
-    draw();
+    if (e.repeat) return; // we do our own repeat
+    startHold(action);
   });
+
+  document.addEventListener('keyup', e => {
+    const action = KEYMAP[e.key];
+    if (action) endHold(action);
+  });
+
+  window.addEventListener('blur', () => held.clear());
+
+  // ---- touch controls ----
+  document.querySelectorAll('[data-action]').forEach(btn => {
+    const action = btn.dataset.action;
+    const down = e => { e.preventDefault(); sound.unlock(); startHold(action); btn.classList.add('active'); };
+    const up = e => { e.preventDefault(); endHold(action); btn.classList.remove('active'); };
+    btn.addEventListener('pointerdown', down);
+    btn.addEventListener('pointerup', up);
+    btn.addEventListener('pointercancel', up);
+    btn.addEventListener('pointerleave', up);
+    btn.addEventListener('contextmenu', e => e.preventDefault());
+  });
+
+  // Swipe/tap on the board itself: tap rotates, swipe left/right moves,
+  // swipe down hard-drops.
+  let touchStart = null;
+  canvas.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1) return;
+    touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now(), moved: 0 };
+  }, { passive: true });
+  canvas.addEventListener('touchmove', e => {
+    if (!touchStart || !running || paused) return;
+    const dx = e.touches[0].clientX - touchStart.x;
+    const cells = Math.trunc(dx / 28);
+    if (cells !== touchStart.moved) {
+      const step = cells > touchStart.moved ? 1 : -1;
+      while (touchStart.moved !== cells) { press(step > 0 ? 'right' : 'left'); touchStart.moved += step; }
+    }
+  }, { passive: true });
+  canvas.addEventListener('touchend', e => {
+    if (!touchStart) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStart.x;
+    const dy = t.clientY - touchStart.y;
+    const quick = Date.now() - touchStart.t < 300;
+    if (!running || gameOver) { startGame(); }
+    else if (dy > 60 && Math.abs(dx) < 40 && quick) press('drop');
+    else if (Math.abs(dx) < 12 && Math.abs(dy) < 12) press('cw');
+    touchStart = null;
+  });
+
+  // ---- buttons ----
+  function setMuteLabel(m) {
+    muteBtn.textContent = m ? '🔇 Sound off' : '🔊 Sound on';
+    muteBtn.setAttribute('aria-pressed', m ? 'true' : 'false');
+  }
+  startBtn.onclick = startGame;
+  pauseBtn.onclick = togglePause;
+  muteBtn.onclick = () => setMuteLabel(sound.toggle());
+  overlayBtn.onclick = () => {
+    if (paused) togglePause();
+    else startGame();
+  };
+  setMuteLabel(sound.muted);
 
   // Pause automatically if the tab loses focus so a piece doesn't drop
   // through the floor while the player is away.
