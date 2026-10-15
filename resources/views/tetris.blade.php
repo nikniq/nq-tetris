@@ -10,26 +10,29 @@
 @section('content')
   <div class="page">
 
-    {{-- The playfield: previews | board | live stats, all sized to the board --}}
+    {{-- Playfield: previews | board | live stats. On phones the stats sit
+         above the board and the previews beside it. --}}
     <section class="stage" aria-label="Game">
-      <aside class="col previews">
+      <aside class="previews">
         <div class="panel">
           <h2>Hold</h2>
-          <canvas id="hold" width="128" height="96"></canvas>
+          <canvas id="hold" width="128" height="96" aria-hidden="true"></canvas>
         </div>
         <div class="panel">
           <h2>Next</h2>
-          <canvas id="next" width="128" height="288"></canvas>
+          <canvas id="next" width="128" height="288" aria-hidden="true"></canvas>
         </div>
       </aside>
 
       <div id="board-wrap">
-        <canvas id="tetris" width="320" height="640"></canvas>
+        <canvas id="tetris" width="320" height="640" role="img" aria-label="Tetris board"></canvas>
         <div id="combo" class="combo" aria-live="polite"></div>
+        <div id="countdown" class="countdown" aria-hidden="true" hidden></div>
         <div id="overlay" class="overlay">
           <div class="overlay-box">
             <h2 id="overlay-title">TETRIS</h2>
             <p id="overlay-text">Pick a mode, then press Start or Enter</p>
+            <dl id="summary" class="summary" hidden></dl>
 
             <div id="setup">
               <div class="modes" role="radiogroup" aria-label="Game mode">
@@ -51,59 +54,71 @@
               </label>
             </div>
 
-            <button id="overlay-btn" type="button">Start</button>
+            <div class="overlay-actions">
+              <button id="overlay-btn" type="button">Start</button>
+              <button id="overlay-alt" type="button" class="secondary" hidden>Resume</button>
+            </div>
+            <p class="overlay-hint"><kbd>Enter</kbd> start · <kbd>Esc</kbd> pause · <kbd>?</kbd> help</p>
           </div>
         </div>
       </div>
 
-      <aside class="col hud">
+      <aside class="hud">
         <div class="stats">
           <div class="stat"><span>Score</span><strong id="score">0</strong></div>
           <div class="stat"><span>Lines</span><strong id="lines">0</strong></div>
           <div class="stat"><span>Level</span><strong id="level">1</strong></div>
           <div class="stat"><span id="time-label">Time</span><strong id="time">0:00</strong></div>
-          <div class="stat wide"><span>Best · <em id="best-mode">Marathon</em></span><strong id="best">{{ $bests['marathon']?->score ?? 0 }}</strong></div>
+          <div class="stat wide"><span>Best<em> · <b id="best-mode">Marathon</b></em></span><strong id="best">{{ $bests['marathon']?->score ?? 0 }}</strong></div>
         </div>
-        <div class="controls">
-          <button id="start-btn" type="button">Start</button>
-          <button id="pause-btn" type="button" class="secondary">Pause</button>
-        </div>
-        <button id="mute-btn" type="button" class="secondary small" aria-pressed="false">🔊 Sound on</button>
-        <p id="save-status" class="hint" aria-live="polite"></p>
-        @guest
-          <p class="hint">
-            <a href="{{ route('login') }}">Log in</a> or
-            <a href="{{ route('register') }}">register</a> to save your results.
-          </p>
-        @endguest
 
-        <div class="panel keys">
-          <h2>Keys</h2>
-          <dl>
-            <dt>← →</dt><dd>Move</dd>
-            <dt>↑ / X</dt><dd>Rotate</dd>
-            <dt>Z</dt><dd>Rotate back</dd>
-            <dt>↓</dt><dd>Soft drop</dd>
-            <dt>Space</dt><dd>Hard drop</dd>
-            <dt>C</dt><dd>Hold</dd>
-            <dt>P</dt><dd>Pause</dd>
-            <dt>M</dt><dd>Mute</dd>
-          </dl>
+        <div class="hud-actions">
+          <div class="controls">
+            <button id="start-btn" type="button">New game</button>
+            <button id="pause-btn" type="button" class="secondary">Pause</button>
+          </div>
+          <div class="toolbar">
+            <button id="mute-btn" type="button" class="secondary small" aria-pressed="false">🔊 Sound</button>
+            <button id="settings-btn" type="button" class="secondary small" aria-haspopup="dialog">⚙ Settings</button>
+            <button id="help-btn" type="button" class="secondary small" aria-haspopup="dialog">? Help</button>
+          </div>
+          <p id="save-status" class="hint" aria-live="polite"></p>
+          @guest
+            <p class="hint">
+              <a href="{{ route('login') }}">Log in</a> or
+              <a href="{{ route('register') }}">register</a> to save your results.
+            </p>
+          @endguest
+
+          <div class="panel keys">
+            <h2>Keys</h2>
+            <dl>
+              <dt>← →</dt><dd>Move</dd>
+              <dt>↑ / X</dt><dd>Rotate</dd>
+              <dt>Z</dt><dd>Rotate back</dd>
+              <dt>↓</dt><dd>Soft drop</dd>
+              <dt>Space</dt><dd>Hard drop</dd>
+              <dt>C</dt><dd>Hold</dd>
+              <dt>P / Esc</dt><dd>Pause</dd>
+              <dt>M</dt><dd>Mute</dd>
+              <dt>?</dt><dd>Help</dd>
+            </dl>
+          </div>
         </div>
       </aside>
     </section>
 
     <div id="touch" aria-label="Touch controls">
       <div class="row">
-        <button type="button" data-action="hold">Hold</button>
-        <button type="button" data-action="ccw">↺</button>
-        <button type="button" data-action="cw">↻</button>
-        <button type="button" data-action="drop">Drop</button>
+        <button type="button" data-action="hold" aria-label="Hold">Hold</button>
+        <button type="button" data-action="ccw" aria-label="Rotate left">↺</button>
+        <button type="button" data-action="cw" aria-label="Rotate right">↻</button>
+        <button type="button" data-action="drop" aria-label="Hard drop">Drop</button>
       </div>
       <div class="row">
-        <button type="button" data-action="left">◀</button>
-        <button type="button" data-action="down">▼</button>
-        <button type="button" data-action="right">▶</button>
+        <button type="button" data-action="left" aria-label="Move left">◀</button>
+        <button type="button" data-action="down" aria-label="Soft drop">▼</button>
+        <button type="button" data-action="right" aria-label="Move right">▶</button>
       </div>
     </div>
 
@@ -134,6 +149,7 @@
                 @endforeach
               </ol>
             @endif
+            <p class="board-note">Each player's best result is shown once.</p>
           </div>
         @endforeach
       </div>
@@ -158,8 +174,97 @@
         @endauth
       </div>
     </section>
-
   </div>
+
+  {{-- Settings --}}
+  <dialog id="settings-dialog" class="dialog" aria-labelledby="settings-title">
+    <form method="dialog">
+      <h2 id="settings-title" class="dialog-title">Settings</h2>
+
+      <fieldset>
+        <legend>Display</legend>
+        <label class="toggle"><input type="checkbox" id="set-ghost" /> Ghost piece <small>shows where the piece will land</small></label>
+        <label class="toggle"><input type="checkbox" id="set-grid" /> Grid lines</label>
+        <label class="toggle"><input type="checkbox" id="set-effects" /> Particles and screen shake</label>
+        <label class="toggle"><input type="checkbox" id="set-countdown" /> 3-2-1 countdown before each game</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Handling</legend>
+        <label class="range">
+          <span>Auto-repeat delay <output id="set-das-out"></output></span>
+          <input type="range" id="set-das" min="50" max="300" step="10" />
+          <small>How long to hold left or right before the piece starts sliding.</small>
+        </label>
+        <label class="range">
+          <span>Auto-repeat speed <output id="set-arr-out"></output></span>
+          <input type="range" id="set-arr" min="0" max="100" step="5" />
+          <small>Time between steps while sliding. 0 moves straight to the wall.</small>
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Sound</legend>
+        <label class="range">
+          <span>Volume <output id="set-volume-out"></output></span>
+          <input type="range" id="set-volume" min="0" max="100" step="5" />
+        </label>
+      </fieldset>
+
+      <div class="dialog-actions">
+        <button type="button" id="set-reset" class="secondary">Reset to defaults</button>
+        <button value="close">Done</button>
+      </div>
+      <p class="hint">Settings are saved in this browser.</p>
+    </form>
+  </dialog>
+
+  {{-- Help --}}
+  <dialog id="help-dialog" class="dialog" aria-labelledby="help-title">
+    <form method="dialog">
+      <h2 id="help-title" class="dialog-title">How to play</h2>
+      <p>Move and rotate the falling pieces to fill complete rows. Full rows clear and score points. The game ends when the stack reaches the top.</p>
+
+      <h3>Modes</h3>
+      <dl class="help-list">
+        <dt>Marathon</dt><dd>Endless. The speed rises every 10 lines. Ranked by score.</dd>
+        <dt>Sprint 40</dt><dd>Clear 40 lines as fast as possible. Ranked by time.</dd>
+        <dt>Ultra 2:00</dt><dd>Two minutes to score as much as possible. Ranked by score.</dd>
+      </dl>
+
+      <h3>Controls</h3>
+      <dl class="help-list keys-list">
+        <dt>← →</dt><dd>Move. Hold to slide.</dd>
+        <dt>↑ or X</dt><dd>Rotate clockwise</dd>
+        <dt>Z</dt><dd>Rotate counter-clockwise</dd>
+        <dt>↓</dt><dd>Soft drop, 1 point per row</dd>
+        <dt>Space</dt><dd>Hard drop, 2 points per row</dd>
+        <dt>C or Shift</dt><dd>Hold the piece for later, once per piece</dd>
+        <dt>P or Esc</dt><dd>Pause</dd>
+        <dt>M</dt><dd>Mute</dd>
+        <dt>Touch</dt><dd>Tap the board to rotate, swipe to move, flick down to drop</dd>
+      </dl>
+
+      <h3>Scoring</h3>
+      <p class="hint">Every value is multiplied by the current level.</p>
+      <table class="score-table">
+        <tbody>
+          <tr><th>Single · Double · Triple</th><td>100 · 300 · 500</td></tr>
+          <tr><th>Tetris (4 lines)</th><td>800</td></tr>
+          <tr><th>T-spin, 0 to 3 lines</th><td>400 · 800 · 1,200 · 1,600</td></tr>
+          <tr><th>T-spin Mini, 0 to 2 lines</th><td>100 · 200 · 400</td></tr>
+          <tr><th>Back-to-back Tetris or T-spin</th><td>× 1.5</td></tr>
+          <tr><th>Combo, consecutive clears</th><td>+ 50 × combo</td></tr>
+          <tr><th>Perfect clear, empty board</th><td>+ 800 to 2,000</td></tr>
+        </tbody>
+      </table>
+      <p class="hint">A T-spin is a T piece rotated into a slot where three of its four corners are blocked.</p>
+
+      <div class="dialog-actions">
+        <button value="close">Got it</button>
+      </div>
+    </form>
+  </dialog>
 @endsection
 
 @push('scripts')

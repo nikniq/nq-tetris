@@ -4,8 +4,10 @@
 
   const canvas = $('tetris');
   const ctx = canvas.getContext('2d');
-  const holdCtx = $('hold').getContext('2d');
-  const nextCtx = $('next').getContext('2d');
+  const holdCv = $('hold');
+  const holdCtx = holdCv.getContext('2d');
+  const nextCv = $('next');
+  const nextCtx = nextCv.getContext('2d');
   const boardWrap = $('board-wrap');
 
   const scoreElem = $('score');
@@ -23,10 +25,17 @@
   const overlayTitle = $('overlay-title');
   const overlayText = $('overlay-text');
   const overlayBtn = $('overlay-btn');
+  const overlayAlt = $('overlay-alt');
+  const summaryElem = $('summary');
+  const countdownElem = $('countdown');
   const comboElem = $('combo');
   const setupElem = $('setup');
   const modeHelp = $('mode-help');
   const startLevelSel = $('start-level');
+  const settingsBtn = $('settings-btn');
+  const helpBtn = $('help-btn');
+  const settingsDlg = $('settings-dialog');
+  const helpDlg = $('help-dialog');
 
   const CONFIG = window.TETRIS || { authenticated: false, bests: {} };
   const reducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -34,11 +43,18 @@
   const COLS = 10;
   const ROWS = 20;
   const BLOCK_SIZE = 32;
+  const W = COLS * BLOCK_SIZE;   // logical board size; the backing store is scaled to fit
+  const H = ROWS * BLOCK_SIZE;
+  const HOLD_W = 128, HOLD_H = 96;
+  const NEXT_W = 128, NEXT_H = 288;
   const PREVIEW_BLOCK = 24;
   const NEXT_COUNT = 3;
   const LINES_PER_LEVEL = 10;
-  const LINE_SCORES = [0, 100, 300, 500, 800];   // 0..4 lines, scaled by level
-  const TSPIN_SCORES = [400, 800, 1200, 1600];    // T-spin with 0..3 lines
+  const LINE_SCORES = [0, 100, 300, 500, 800];      // 0..4 lines, scaled by level
+  const TSPIN_SCORES = [400, 800, 1200, 1600];       // full T-spin with 0..3 lines
+  const TSPIN_MINI_SCORES = [100, 200, 400];         // mini T-spin with 0..2 lines
+  const PERFECT_CLEAR_SCORES = [0, 800, 1200, 1800, 2000];
+  const COUNTDOWN_STEP = 500;                         // ms per "3", "2", "1"
 
   const MODES = {
     marathon: { label: 'Marathon', help: 'Endless. Speed rises every 10 lines.', timeLabel: 'Time' },
@@ -46,9 +62,6 @@
     ultra:    { label: 'Ultra 2:00', help: 'Score as much as you can in two minutes. Speed stays fixed.', timeLabel: 'Left', timeLimit: 120000 },
   };
 
-  // Feel
-  const DAS = 170;          // ms before a held left/right starts repeating
-  const ARR = 40;           // ms between repeats once it has started
   const SOFT_DROP_RATE = 45;
   const LOCK_DELAY = 500;   // ms a piece can rest before it locks
   const LOCK_RESETS = 15;   // moves/rotates that may postpone the lock
@@ -65,6 +78,8 @@
     '#f00000', // Z
   ];
 
+  // Spawn orientations match the Super Rotation System, so rotating the
+  // bounding box gives the SRS states directly.
   const SHAPES = [
     [],
     [
@@ -104,6 +119,53 @@
     ], // Z
   ];
 
+  // SRS wall-kick tables, keyed "from>to" rotation state (0 spawn, 1 right,
+  // 2 reversed, 3 left). Offsets use the SRS convention of y pointing up;
+  // the board's y grows downward, so dy is negated when a kick is applied.
+  const KICKS_JLSTZ = {
+    '0>1': [[0,0], [-1,0], [-1, 1], [0,-2], [-1,-2]],
+    '1>0': [[0,0], [ 1,0], [ 1,-1], [0, 2], [ 1, 2]],
+    '1>2': [[0,0], [ 1,0], [ 1,-1], [0, 2], [ 1, 2]],
+    '2>1': [[0,0], [-1,0], [-1, 1], [0,-2], [-1,-2]],
+    '2>3': [[0,0], [ 1,0], [ 1, 1], [0,-2], [ 1,-2]],
+    '3>2': [[0,0], [-1,0], [-1,-1], [0, 2], [-1, 2]],
+    '3>0': [[0,0], [-1,0], [-1,-1], [0, 2], [-1, 2]],
+    '0>3': [[0,0], [ 1,0], [ 1, 1], [0,-2], [ 1,-2]],
+  };
+  const KICKS_I = {
+    '0>1': [[0,0], [-2,0], [ 1,0], [-2,-1], [ 1, 2]],
+    '1>0': [[0,0], [ 2,0], [-1,0], [ 2, 1], [-1,-2]],
+    '1>2': [[0,0], [-1,0], [ 2,0], [-1, 2], [ 2,-1]],
+    '2>1': [[0,0], [ 1,0], [-2,0], [ 1,-2], [-2, 1]],
+    '2>3': [[0,0], [ 2,0], [-1,0], [ 2, 1], [-1,-2]],
+    '3>2': [[0,0], [-2,0], [ 1,0], [-2,-1], [ 1, 2]],
+    '3>0': [[0,0], [ 1,0], [-2,0], [ 1,-2], [-2, 1]],
+    '0>3': [[0,0], [-1,0], [ 2,0], [-1, 2], [ 2,-1]],
+  };
+
+  // ---- storage ----
+  function load(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw == null ? fallback : JSON.parse(raw);
+    } catch (_) { return fallback; }
+  }
+  function save(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {}
+  }
+
+  // ---- settings ----
+  const DEFAULT_SETTINGS = {
+    ghost: true,
+    grid: true,
+    effects: !reducedMotion,
+    countdown: true,
+    das: 170,     // ms before a held left/right starts repeating
+    arr: 40,      // ms between repeats once it has started (0 = instant)
+    volume: 60,   // percent
+  };
+  const settings = Object.assign({}, DEFAULT_SETTINGS, load('tetris.settings', {}));
+
   // ---- sound (synthesised, no files to load) ----
   const sound = (() => {
     let actx = null;
@@ -121,7 +183,8 @@
     }
 
     function tone(freq, dur, type = 'square', gain = 0.05, slide = 0) {
-      if (muted) return;
+      const vol = settings.volume / 60;
+      if (muted || vol <= 0) return;
       const a = ensure();
       if (!a) return;
       const osc = a.createOscillator();
@@ -129,12 +192,15 @@
       osc.type = type;
       osc.frequency.setValueAtTime(freq, a.currentTime);
       if (slide) osc.frequency.exponentialRampToValueAtTime(Math.max(30, freq + slide), a.currentTime + dur);
-      g.gain.setValueAtTime(gain, a.currentTime);
+      g.gain.setValueAtTime(gain * vol, a.currentTime);
       g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
       osc.connect(g).connect(a.destination);
       osc.start();
       osc.stop(a.currentTime + dur);
     }
+
+    const seq = (notes, gap, dur, type, gain) =>
+      notes.forEach((f, i) => setTimeout(() => tone(f, dur, type, gain), i * gap));
 
     return {
       move:   () => tone(220, 0.04, 'square', 0.03),
@@ -142,13 +208,15 @@
       lock:   () => tone(140, 0.08, 'square', 0.05, -60),
       drop:   () => tone(110, 0.1, 'sawtooth', 0.05, -70),
       hold:   () => tone(440, 0.06, 'triangle', 0.04),
-      clear:  n => { for (let i = 0; i < n; i++) setTimeout(() => tone(520 + i * 120, 0.12, 'square', 0.05), i * 60); },
-      tetris: () => { [660, 880, 1100, 1320].forEach((f, i) => setTimeout(() => tone(f, 0.14, 'square', 0.06), i * 70)); },
-      tspin:  () => { [880, 740, 988].forEach((f, i) => setTimeout(() => tone(f, 0.1, 'triangle', 0.06), i * 60)); },
-      level:  () => { [523, 659, 784].forEach((f, i) => setTimeout(() => tone(f, 0.12, 'triangle', 0.06), i * 90)); },
-      win:    () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.2, 'triangle', 0.07), i * 120)); },
+      clear:  n => seq(Array.from({ length: n }, (_, i) => 520 + i * 120), 60, 0.12, 'square', 0.05),
+      tetris: () => seq([660, 880, 1100, 1320], 70, 0.14, 'square', 0.06),
+      tspin:  () => seq([880, 740, 988], 60, 0.1, 'triangle', 0.06),
+      perfect:() => seq([784, 988, 1175, 1568, 1976], 70, 0.16, 'triangle', 0.07),
+      level:  () => seq([523, 659, 784], 90, 0.12, 'triangle', 0.06),
+      win:    () => seq([523, 659, 784, 1047], 120, 0.2, 'triangle', 0.07),
       over:   () => { [400, 300, 200, 120].forEach((f, i) => setTimeout(() => tone(f, 0.25, 'sawtooth', 0.06, -40), i * 160)); },
       tick:   () => tone(1200, 0.03, 'square', 0.03),
+      go:     () => tone(1600, 0.08, 'square', 0.04),
       unlock: ensure,
       get muted() { return muted; },
       toggle() {
@@ -162,19 +230,24 @@
   // ---- state ----
   let board, piece, nextQueue, holdPiece, holdUsed;
   let score, lines, level, startLevel, combo, backToBack;
+  let pieces, tetrises, tspins, maxCombo;
   let mode = 'marathon';
-  let elapsed = 0;       // ms of play this game (pauses excluded)
-  let lastTick = -1;     // last whole second a countdown tick played
+  let elapsed = 0;       // ms of play this game (pauses and countdown excluded)
+  let countdown = 0;     // ms left in the pre-game countdown
+  let lastCount = 0;
+  let lastTick = -1;     // last whole second a countdown tick played (Ultra)
   let running = false;   // a game is in progress (may be paused)
   let paused = false;
   let gameOver = false;
-  let clearing = null;   // { rows: [...], until: ts, tspin } while rows flash
+  let pendingRestart = false; // "new game?" screen shown over a paused game
+  let clearing = null;   // { rows, until, tspin } while rows flash
   let dropCounter = 0;
   let lastTime = 0;
   let bag = [];
   let lockTimer = 0;     // ms the piece has rested on something
   let lockResets = 0;
   let lastWasRotate = false; // for T-spin detection
+  let lastKick = 0;          // which kick the last rotation used
   let particles = [];
 
   // Per-mode bests: players get theirs from the server, guests keep one
@@ -184,10 +257,8 @@
     const s = CONFIG.bests && CONFIG.bests[m];
     bests[m] = s ? { score: s.score, duration_ms: s.duration_ms } : null;
     if (!CONFIG.authenticated) {
-      try {
-        const raw = localStorage.getItem('tetris.best.' + m);
-        if (raw) bests[m] = JSON.parse(raw);
-      } catch (_) {}
+      const local = load('tetris.best.' + m, null);
+      if (local) bests[m] = local;
     }
   }
 
@@ -200,9 +271,7 @@
 
   function fmtTime(ms) {
     const total = Math.max(0, Math.floor(ms / 1000));
-    const m = Math.floor(total / 60);
-    const s = total % 60;
-    return `${m}:${String(s).padStart(2, '0')}`;
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
   }
 
   function fmtTimePrecise(ms) {
@@ -225,11 +294,11 @@
   }
 
   function makePiece(typeId) {
-    const shape = SHAPES[typeId].map(row => row.slice());
     return {
       typeId,
-      shape,
-      x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2),
+      shape: SHAPES[typeId].map(row => row.slice()),
+      rot: 0,
+      x: typeId === 4 ? 4 : 3, // guideline spawn columns
       y: 0,
     };
   }
@@ -281,19 +350,25 @@
     }
   }
 
-  // Rotate with simple wall kicks: try in place, then one or two cells
-  // either side, then one up, so pieces against a wall or floor still turn.
   function rotatePiece(dir) {
     if (piece.typeId === 4) return false; // O never changes
-    const rotated = rotateMatrix(piece.shape, dir);
-    const kicks = [[0,0], [-1,0], [1,0], [-2,0], [2,0], [0,-1], [-1,-1], [1,-1]];
+    const from = piece.rot;
+    const to = (from + (dir > 0 ? 1 : 3)) % 4;
+    const kicks = (piece.typeId === 1 ? KICKS_I : KICKS_JLSTZ)[from + '>' + to];
     const original = piece.shape;
     const ox = piece.x, oy = piece.y;
-    piece.shape = rotated;
-    for (const [kx, ky] of kicks) {
-      piece.x = ox + kx;
-      piece.y = oy + ky;
-      if (!collide(board, piece)) { sound.rotate(); touchLock(); lastWasRotate = true; return true; }
+    piece.shape = rotateMatrix(original, dir);
+    for (let i = 0; i < kicks.length; i++) {
+      piece.x = ox + kicks[i][0];
+      piece.y = oy - kicks[i][1];
+      if (!collide(board, piece)) {
+        piece.rot = to;
+        lastKick = i;
+        lastWasRotate = true;
+        sound.rotate();
+        touchLock();
+        return true;
+      }
     }
     piece.shape = original;
     piece.x = ox;
@@ -316,18 +391,47 @@
     return probe.y - 1;
   }
 
-  // A T piece that was last rotated (not moved) and has three of the four
-  // cells diagonal to its centre blocked counts as a T-spin.
-  function isTSpin() {
-    if (piece.typeId !== 6 || !lastWasRotate) return false;
-    // The T's centre is always the middle of its 3x3 box.
+  // T-spin rule: the T was last rotated (not moved) and three of the four
+  // cells diagonal to its centre are blocked. It is a full T-spin when both
+  // corners on the side the T points to are blocked, or the rotation used
+  // the last SRS kick; otherwise it is a mini.
+  function tSpinType() {
+    if (piece.typeId !== 6 || !lastWasRotate) return null;
     const cx = piece.x + 1, cy = piece.y + 1;
-    let filled = 0;
-    for (const [dx, dy] of [[-1,-1], [1,-1], [-1,1], [1,1]]) {
+    const blocked = ([dx, dy]) => {
       const x = cx + dx, y = cy + dy;
-      if (x < 0 || x >= COLS || y >= ROWS || (y >= 0 && board[y][x] !== 0)) filled++;
-    }
-    return filled >= 3;
+      return x < 0 || x >= COLS || y >= ROWS || (y >= 0 && board[y][x] !== 0);
+    };
+    const corners = [[-1,-1], [1,-1], [1,1], [-1,1]];
+    if (corners.filter(blocked).length < 3) return null;
+    const front = [
+      [[-1,-1], [1,-1]],  // pointing up
+      [[1,-1], [1,1]],    // pointing right
+      [[-1,1], [1,1]],    // pointing down
+      [[-1,-1], [-1,1]],  // pointing left
+    ][piece.rot];
+    return front.every(blocked) || lastKick === 4 ? 'full' : 'mini';
+  }
+
+  // ---- canvas sizing ----
+  // Each canvas draws in fixed logical units; its backing store is resized
+  // to the element's CSS width times the device pixel ratio so blocks stay
+  // sharp at any size.
+  function fit(cv, c, lw, lh) {
+    const cssW = cv.clientWidth || lw;
+    const ratio = window.devicePixelRatio || 1;
+    const bw = Math.max(1, Math.round(cssW * ratio));
+    const bh = Math.max(1, Math.round(cssW * (lh / lw) * ratio));
+    if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
+    const s = bw / lw;
+    c.setTransform(s, 0, 0, s, 0, 0);
+  }
+
+  function fitAll() {
+    fit(canvas, ctx, W, H);
+    fit(holdCv, holdCtx, HOLD_W, HOLD_H);
+    fit(nextCv, nextCtx, NEXT_W, NEXT_H);
+    draw();
   }
 
   // ---- drawing ----
@@ -352,50 +456,51 @@
   }
 
   function drawGrid() {
-    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
     ctx.lineWidth = 1;
+    ctx.beginPath();
     for (let x = 1; x < COLS; x++) {
-      ctx.beginPath();
       ctx.moveTo(x * BLOCK_SIZE + 0.5, 0);
-      ctx.lineTo(x * BLOCK_SIZE + 0.5, canvas.height);
-      ctx.stroke();
+      ctx.lineTo(x * BLOCK_SIZE + 0.5, H);
     }
     for (let y = 1; y < ROWS; y++) {
-      ctx.beginPath();
       ctx.moveTo(0, y * BLOCK_SIZE + 0.5);
-      ctx.lineTo(canvas.width, y * BLOCK_SIZE + 0.5);
-      ctx.stroke();
+      ctx.lineTo(W, y * BLOCK_SIZE + 0.5);
     }
+    ctx.stroke();
   }
 
-  // Draw a piece centred in a slot of the preview canvas. slot 0 is the top.
-  function drawPreviewPiece(c, p, slot, slotHeight) {
-    const cv = c.canvas;
+  // Draw a piece centred in a slot of a preview canvas. Slot 0 is the top.
+  function drawPreviewPiece(c, lw, p, slot, slotHeight) {
     const rows = p.shape.filter(r => r.some(v => v));
     const cols = p.shape[0].map((_, i) => p.shape.some(r => r[i])).reduce((a, v, i) => (v ? a.concat(i) : a), []);
     const w = cols.length, h = rows.length;
-    const offX = (cv.width / PREVIEW_BLOCK - w) / 2 - cols[0];
+    const offX = (lw / PREVIEW_BLOCK - w) / 2 - cols[0];
     const offY = (slot * slotHeight + (slotHeight - h * PREVIEW_BLOCK) / 2) / PREVIEW_BLOCK - p.shape.findIndex(r => r.some(v => v));
     drawMatrix(c, p.shape, { x: offX, y: offY }, PREVIEW_BLOCK);
   }
 
   function drawPreviews() {
-    nextCtx.fillStyle = '#111';
-    nextCtx.fillRect(0, 0, nextCtx.canvas.width, nextCtx.canvas.height);
-    const slotH = nextCtx.canvas.height / NEXT_COUNT;
-    (nextQueue || []).forEach((p, i) => drawPreviewPiece(nextCtx, p, i, slotH));
+    nextCtx.fillStyle = '#0f1012';
+    nextCtx.fillRect(0, 0, NEXT_W, NEXT_H);
+    const slotH = NEXT_H / NEXT_COUNT;
+    (nextQueue || []).forEach((p, i) => {
+      nextCtx.globalAlpha = i === 0 ? 1 : 0.75;
+      drawPreviewPiece(nextCtx, NEXT_W, p, i, slotH);
+    });
+    nextCtx.globalAlpha = 1;
 
-    holdCtx.fillStyle = '#111';
-    holdCtx.fillRect(0, 0, holdCtx.canvas.width, holdCtx.canvas.height);
+    holdCtx.fillStyle = '#0f1012';
+    holdCtx.fillRect(0, 0, HOLD_W, HOLD_H);
     if (holdPiece) {
-      holdCtx.globalAlpha = holdUsed ? 0.4 : 1;
-      drawPreviewPiece(holdCtx, holdPiece, 0, holdCtx.canvas.height);
+      holdCtx.globalAlpha = holdUsed ? 0.35 : 1;
+      drawPreviewPiece(holdCtx, HOLD_W, holdPiece, 0, HOLD_H);
       holdCtx.globalAlpha = 1;
     }
   }
 
   function spawnParticles(rows, tspin) {
-    if (reducedMotion) return;
+    if (!settings.effects) return;
     for (const y of rows) {
       for (let x = 0; x < COLS; x++) {
         const color = COLORS[board[y][x]] || '#fff';
@@ -436,25 +541,41 @@
   }
 
   function shake() {
-    if (reducedMotion) return;
+    if (!settings.effects) return;
     boardWrap.classList.remove('shake');
     void boardWrap.offsetWidth; // restart the animation
     boardWrap.classList.add('shake');
   }
 
+  // 0 when the top four rows are empty, rising to 1 as the stack reaches
+  // the ceiling. Drives the red warning glow.
+  function dangerLevel() {
+    for (let y = 0; y < 4; y++) if (board[y].some(v => v)) return (4 - y) / 4;
+    return 0;
+  }
+
   function draw(now = performance.now()) {
-    ctx.fillStyle = '#111';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    drawGrid();
+    ctx.fillStyle = '#0f1012';
+    ctx.fillRect(0, 0, W, H);
+    if (settings.grid) drawGrid();
     drawMatrix(ctx, board, { x: 0, y: 0 }, BLOCK_SIZE);
+
+    const danger = running && !gameOver ? dangerLevel() : 0;
+    if (danger > 0) {
+      const g = ctx.createLinearGradient(0, 0, 0, H * 0.35);
+      g.addColorStop(0, `rgba(255, 60, 90, ${0.35 * danger})`);
+      g.addColorStop(1, 'rgba(255, 60, 90, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H * 0.35);
+    }
 
     if (clearing) {
       // Flash the full rows white/transparent at ~12Hz until they collapse.
       const on = Math.floor((clearing.until - now) / 40) % 2 === 0;
       ctx.fillStyle = on ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.25)';
-      for (const y of clearing.rows) ctx.fillRect(0, y * BLOCK_SIZE, canvas.width, BLOCK_SIZE);
+      for (const y of clearing.rows) ctx.fillRect(0, y * BLOCK_SIZE, W, BLOCK_SIZE);
     } else if (piece && running) {
-      drawMatrix(ctx, piece.shape, { x: piece.x, y: ghostY() }, BLOCK_SIZE, 0.22);
+      if (settings.ghost) drawMatrix(ctx, piece.shape, { x: piece.x, y: ghostY() }, BLOCK_SIZE, 0.22);
       // Fade slightly as the lock timer runs down so the player can feel it.
       const alpha = grounded() ? 1 - 0.35 * (lockTimer / LOCK_DELAY) : 1;
       drawMatrix(ctx, piece.shape, { x: piece.x, y: piece.y }, BLOCK_SIZE, alpha);
@@ -473,7 +594,7 @@
 
   function updateHud() {
     scoreElem.textContent = score.toLocaleString();
-    linesElem.textContent = mode === 'sprint' ? `${lines} / ${MODES.sprint.targetLines}` : lines;
+    linesElem.textContent = mode === 'sprint' ? `${lines}/${MODES.sprint.targetLines}` : lines;
     levelElem.textContent = level;
     timeLabel.textContent = MODES[mode].timeLabel;
     timeElem.textContent = fmtTime(MODES[mode].timeLimit ? MODES[mode].timeLimit - elapsed : elapsed);
@@ -491,19 +612,41 @@
     comboElem.textContent = text;
     comboElem.classList.add('show');
     clearTimeout(comboTimer);
-    comboTimer = setTimeout(() => comboElem.classList.remove('show'), 1200);
+    comboTimer = setTimeout(() => comboElem.classList.remove('show'), 1400);
   }
 
-  function showOverlay(title, text, btnLabel, withSetup) {
+  function showOverlay(title, text, btnLabel, opts = {}) {
     overlayTitle.textContent = title;
     overlayText.textContent = text;
     overlayBtn.textContent = btnLabel;
-    setupElem.classList.toggle('hidden', !withSetup);
+    setupElem.classList.toggle('hidden', !opts.setup);
+    if (overlayAlt) {
+      overlayAlt.hidden = !opts.alt;
+      if (opts.alt) overlayAlt.textContent = opts.alt;
+    }
+    if (summaryElem && !opts.summary) summaryElem.hidden = true;
     overlay.classList.remove('hidden');
+    if (overlayBtn.focus) overlayBtn.focus({ preventScroll: true });
   }
 
   function hideOverlay() {
     overlay.classList.add('hidden');
+  }
+
+  function renderSummary() {
+    if (!summaryElem) return;
+    const secs = elapsed / 1000;
+    const rows = [
+      ['Time', fmtTimePrecise(elapsed)],
+      ['Pieces', pieces],
+      ['Pieces / sec', secs > 0 ? (pieces / secs).toFixed(2) : '0.00'],
+      ['Tetrises', tetrises],
+      ['T-spins', tspins],
+      ['Best combo', maxCombo > 0 ? '×' + (maxCombo + 1) : '—'],
+    ];
+    // Values are numbers and fixed labels built here, never user input.
+    summaryElem.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+    summaryElem.hidden = false;
   }
 
   // ---- game flow ----
@@ -525,15 +668,17 @@
   }
 
   function lockPiece() {
-    const tspin = isTSpin();
+    const tspin = tSpinType();
     merge(board, piece);
+    pieces++;
     const rows = fullRows();
     if (rows.length === 0) {
       if (tspin) {
-        // A T-spin with no lines still scores and keeps back-to-back alive.
-        const gained = TSPIN_SCORES[0] * level;
+        // A T-spin with no lines still scores; it does not break back-to-back.
+        const gained = (tspin === 'full' ? TSPIN_SCORES[0] : TSPIN_MINI_SCORES[0]) * level;
         score += gained;
-        flashCombo(`T-spin  +${gained.toLocaleString()}`);
+        tspins++;
+        flashCombo(`${tspin === 'full' ? 'T-spin' : 'T-spin Mini'}  +${gained.toLocaleString()}`);
         sound.tspin();
         updateHud();
       } else {
@@ -562,22 +707,33 @@
     clearing = null;
 
     combo++;
+    maxCombo = Math.max(maxCombo, combo);
     lines += n;
     const notes = [];
     let gained;
-    const difficult = tspin || n === 4;
-    if (tspin) {
+    if (tspin === 'full') {
       gained = TSPIN_SCORES[n] * level;
       notes.push(['T-spin', 'T-spin Single', 'T-spin Double', 'T-spin Triple'][n]);
+      tspins++;
+    } else if (tspin === 'mini') {
+      gained = TSPIN_MINI_SCORES[Math.min(n, 2)] * level;
+      notes.push(['T-spin Mini', 'T-spin Mini Single', 'T-spin Mini Double'][Math.min(n, 2)]);
+      tspins++;
     } else {
       gained = LINE_SCORES[n] * level;
-      if (n === 4) notes.push('TETRIS');
+      if (n === 4) { notes.push('TETRIS'); tetrises++; }
     }
+    const difficult = n === 4 || !!tspin;
     if (difficult && backToBack) { gained = Math.floor(gained * 1.5); notes.unshift('Back-to-back'); }
     backToBack = difficult;
     if (combo > 0) {
       gained += 50 * combo * level;
       notes.push(`Combo ×${combo + 1}`);
+    }
+    if (board.every(row => row.every(v => v === 0))) {
+      gained += PERFECT_CLEAR_SCORES[n] * level;
+      notes.push('PERFECT CLEAR');
+      sound.perfect();
     }
     score += gained;
 
@@ -642,6 +798,24 @@
     if (!running || paused) return;
     const delta = Math.min(time - lastTime, 100); // cap so a hiccup doesn't teleport the piece
     lastTime = time;
+
+    if (countdown > 0) {
+      countdown -= delta;
+      const n = Math.ceil(countdown / COUNTDOWN_STEP);
+      if (countdown <= 0) {
+        countdown = 0;
+        if (countdownElem) countdownElem.hidden = true;
+        sound.go();
+      } else if (n !== lastCount) {
+        lastCount = n;
+        if (countdownElem) countdownElem.textContent = n;
+        sound.tick();
+      }
+      draw(time);
+      requestAnimationFrame(update);
+      return;
+    }
+
     elapsed += delta;
 
     const limit = MODES[mode].timeLimit;
@@ -656,27 +830,26 @@
       if (time >= clearing.until) finishClear();
     } else {
       handleHeldKeys(delta);
-      if (grounded()) {
-        lockTimer += delta;
-        if (lockTimer >= LOCK_DELAY) { lockPiece(); }
-      } else {
-        lockTimer = 0;
-        dropCounter += delta;
-        if (dropCounter > dropIntervalFor(level)) {
-          piece.y++;
-          lastWasRotate = false;
-          dropCounter = 0;
+      if (piece && !gameOver) {
+        if (grounded()) {
+          lockTimer += delta;
+          if (lockTimer >= LOCK_DELAY) lockPiece();
+        } else {
+          lockTimer = 0;
+          dropCounter += delta;
+          if (dropCounter > dropIntervalFor(level)) {
+            piece.y++;
+            lastWasRotate = false;
+            dropCounter = 0;
+          }
         }
       }
     }
 
     updateParticles(delta);
-    if (running) {
-      // Only the seconds digit changes each frame; cheap enough to refresh.
-      timeElem.textContent = fmtTime(limit ? limit - elapsed : elapsed);
-    }
+    if (running) timeElem.textContent = fmtTime(limit ? limit - elapsed : elapsed);
     draw(time);
-    requestAnimationFrame(update);
+    if (running) requestAnimationFrame(update);
   }
 
   function readSetup() {
@@ -685,16 +858,32 @@
     startLevel = Math.min(15, Math.max(1, parseInt(startLevelSel.value, 10) || 1));
   }
 
+  function restoreSetup() {
+    const saved = load('tetris.setup', null);
+    if (!saved) return;
+    if (MODES[saved.mode]) {
+      const r = document.querySelector(`input[name="mode"][value="${saved.mode}"]`);
+      if (r) r.checked = true;
+      modeHelp.textContent = MODES[saved.mode].help;
+    }
+    if (saved.level >= 1 && saved.level <= 15) startLevelSel.value = String(saved.level);
+  }
+
   function startGame() {
     sound.unlock();
     readSetup();
+    save('tetris.setup', { mode, level: startLevel });
     board = createMatrix(COLS, ROWS);
     bag = [];
     score = 0;
     lines = 0;
     level = startLevel;
     combo = -1;
+    maxCombo = 0;
     backToBack = false;
+    pieces = 0;
+    tetrises = 0;
+    tspins = 0;
     holdPiece = null;
     holdUsed = false;
     clearing = null;
@@ -703,7 +892,9 @@
     lastTick = -1;
     gameOver = false;
     paused = false;
+    pendingRestart = false;
     running = true;
+    held.clear();
     nextQueue = [];
     for (let i = 0; i < NEXT_COUNT; i++) nextQueue.push(makePiece(nextTypeId()));
     spawn();
@@ -712,6 +903,17 @@
     saveStatus.className = 'hint';
     hideOverlay();
     pauseBtn.textContent = 'Pause';
+    // A focused button would also react to Space (hard drop) and Enter.
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+
+    countdown = settings.countdown ? 3 * COUNTDOWN_STEP : 0;
+    lastCount = 3;
+    if (countdownElem) {
+      countdownElem.hidden = countdown === 0;
+      countdownElem.textContent = '3';
+    }
+    if (countdown) sound.tick();
+
     lastTime = performance.now();
     requestAnimationFrame(update);
   }
@@ -721,8 +923,10 @@
     paused = !paused;
     pauseBtn.textContent = paused ? 'Resume' : 'Pause';
     if (paused) {
-      showOverlay('PAUSED', 'Press P or Resume to continue', 'Resume', false);
+      held.clear();
+      showOverlay('PAUSED', 'Press P, Esc or Resume to continue', 'Resume');
     } else {
+      pendingRestart = false;
       hideOverlay();
       lastTime = performance.now();
       requestAnimationFrame(update);
@@ -734,13 +938,13 @@
     const prev = bests[mode];
     let isBest;
     if (mode === 'sprint') {
-      isBest = lines >= MODES.sprint.targetLines && (!prev || result.duration_ms <= prev.duration_ms);
+      isBest = lines >= MODES.sprint.targetLines && (!prev || prev.duration_ms == null || result.duration_ms <= prev.duration_ms);
     } else {
       isBest = !prev || score > prev.score;
     }
     if (isBest) {
       bests[mode] = result;
-      if (!CONFIG.authenticated) { try { localStorage.setItem('tetris.best.' + mode, JSON.stringify(result)); } catch (_) {} }
+      if (!CONFIG.authenticated) save('tetris.best.' + mode, result);
     }
     return isBest;
   }
@@ -748,7 +952,9 @@
   function endGame(won) {
     running = false;
     gameOver = true;
+    pendingRestart = false;
     held.clear();
+    if (countdownElem) countdownElem.hidden = true;
     draw();
     if (won) sound.win(); else sound.over();
     const isBest = recordBest();
@@ -764,10 +970,10 @@
     } else {
       title = 'GAME OVER';
       text = `${score.toLocaleString()} points · ${lines} lines · level ${level}`;
-      if (mode === 'sprint') text += ` · ${fmtTimePrecise(elapsed)}`;
     }
     if (isBest) text += ' · New best!';
-    showOverlay(title, text, 'Play again', true);
+    renderSummary();
+    showOverlay(title, text, 'Play again', { setup: true, summary: true });
     submitScore(won);
   }
 
@@ -790,6 +996,7 @@
         credentials: 'same-origin',
         body: JSON.stringify({ mode, score, lines, level, duration_ms: Math.round(elapsed) }),
       });
+      if (res.status === 419 || res.status === 401) throw new Error('your session expired, reload the page');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.best != null) bests[mode] = { score: data.best, duration_ms: data.best_duration_ms };
@@ -808,7 +1015,7 @@
   const held = new Map();
 
   function press(action) {
-    if (!running || paused || clearing || !piece) return;
+    if (!running || paused || clearing || !piece || countdown > 0) return;
     switch (action) {
       case 'left':  move(-1); break;
       case 'right': move(1); break;
@@ -824,6 +1031,10 @@
 
   function startHold(action) {
     if (held.has(action)) return;
+    // Pressing one direction cancels the other, so a quick left-right
+    // switch doesn't leave the first direction auto-repeating.
+    if (action === 'left') held.delete('right');
+    if (action === 'right') held.delete('left');
     held.set(action, { elapsed: 0, repeating: false });
     press(action);
   }
@@ -836,11 +1047,18 @@
     for (const [action, h] of held) {
       if (action !== 'left' && action !== 'right' && action !== 'down') continue;
       h.elapsed += delta;
-      const start = action === 'down' ? 0 : DAS;
-      const rate = action === 'down' ? SOFT_DROP_RATE : ARR;
+      const start = action === 'down' ? 0 : settings.das;
+      const rate = action === 'down' ? SOFT_DROP_RATE : settings.arr;
       if (!h.repeating) {
-        if (h.elapsed >= start) { h.repeating = true; h.elapsed = 0; }
-        else continue;
+        if (h.elapsed < start) continue;
+        h.repeating = true;
+        h.elapsed = 0;
+      }
+      if (rate === 0) {
+        // Instant auto-repeat: slide to the wall.
+        while (piece && !clearing && move(action === 'left' ? -1 : 1)) { /* keep going */ }
+        h.elapsed = 0;
+        continue;
       }
       while (h.elapsed >= rate && piece && !clearing) {
         h.elapsed -= rate;
@@ -857,12 +1075,21 @@
     c: 'hold', C: 'hold', Shift: 'hold',
   };
 
+  function dialogOpen() {
+    return !!document.querySelector('dialog[open]');
+  }
+
   document.addEventListener('keydown', e => {
+    if (dialogOpen()) return; // the dialog owns the keyboard (Esc closes it)
     const tag = e.target && e.target.tagName;
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) && e.target.type !== 'radio' && e.key !== 'Escape') return;
-    if (e.key === 'Enter' && (!running || gameOver)) {
-      e.preventDefault();
-      startGame();
+
+    if (e.key === 'Enter') {
+      if (tag === 'BUTTON') return; // let the focused button do its job
+      if (!running || gameOver || pendingRestart) {
+        e.preventDefault();
+        startGame();
+      }
       return;
     }
     if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
@@ -873,6 +1100,11 @@
     if (e.key === 'm' || e.key === 'M') {
       e.preventDefault();
       setMuteLabel(sound.toggle());
+      return;
+    }
+    if (e.key === '?') {
+      e.preventDefault();
+      openDialog(helpDlg);
       return;
     }
     const action = KEYMAP[e.key];
@@ -903,7 +1135,7 @@
   });
 
   // Swipe/tap on the board itself: tap rotates, swipe left/right moves,
-  // swipe down hard-drops.
+  // flick down hard-drops.
   let touchStart = null;
   canvas.addEventListener('touchstart', e => {
     if (e.touches.length !== 1) return;
@@ -911,8 +1143,9 @@
   }, { passive: true });
   canvas.addEventListener('touchmove', e => {
     if (!touchStart || !running || paused) return;
+    const cell = (canvas.clientWidth || W) / COLS;
     const dx = e.touches[0].clientX - touchStart.x;
-    const cells = Math.trunc(dx / 28);
+    const cells = Math.trunc(dx / cell);
     if (cells !== touchStart.moved) {
       const step = cells > touchStart.moved ? 1 : -1;
       while (touchStart.moved !== cells) { press(step > 0 ? 'right' : 'left'); touchStart.moved += step; }
@@ -924,11 +1157,73 @@
     const dx = t.clientX - touchStart.x;
     const dy = t.clientY - touchStart.y;
     const quick = Date.now() - touchStart.t < 300;
-    if (!running || gameOver) { /* the overlay button handles starting */ }
-    else if (dy > 60 && Math.abs(dx) < 40 && quick) press('drop');
-    else if (Math.abs(dx) < 12 && Math.abs(dy) < 12) press('cw');
+    if (running && !gameOver) {
+      if (dy > 60 && Math.abs(dx) < 40 && quick) press('drop');
+      else if (Math.abs(dx) < 12 && Math.abs(dy) < 12) press('cw');
+    }
     touchStart = null;
   });
+
+  // ---- dialogs ----
+  function openDialog(dlg) {
+    if (!dlg) return;
+    if (running && !paused && !gameOver) togglePause();
+    held.clear();
+    if (dlg === settingsDlg) syncSettingsForm();
+    if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+  }
+
+  const SETTING_INPUTS = {
+    ghost:     ['set-ghost', 'bool'],
+    grid:      ['set-grid', 'bool'],
+    effects:   ['set-effects', 'bool'],
+    countdown: ['set-countdown', 'bool'],
+    das:       ['set-das', 'num'],
+    arr:       ['set-arr', 'num'],
+    volume:    ['set-volume', 'num'],
+  };
+
+  function formatSetting(key, v) {
+    if (key === 'arr' && v === 0) return 'instant';
+    if (key === 'das' || key === 'arr') return `${v} ms`;
+    if (key === 'volume') return `${v}%`;
+    return '';
+  }
+
+  function syncSettingsForm() {
+    for (const [key, [id, kind]] of Object.entries(SETTING_INPUTS)) {
+      const input = $(id);
+      if (!input) continue;
+      if (kind === 'bool') input.checked = !!settings[key];
+      else input.value = settings[key];
+      const out = $(id + '-out');
+      if (out) out.textContent = formatSetting(key, settings[key]);
+    }
+  }
+
+  for (const [key, [id, kind]] of Object.entries(SETTING_INPUTS)) {
+    const input = $(id);
+    if (!input) continue;
+    input.addEventListener(kind === 'bool' ? 'change' : 'input', () => {
+      settings[key] = kind === 'bool' ? input.checked : Number(input.value);
+      save('tetris.settings', settings);
+      syncSettingsForm();
+      draw();
+    });
+  }
+
+  const resetBtn = $('set-reset');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      Object.assign(settings, DEFAULT_SETTINGS);
+      save('tetris.settings', settings);
+      syncSettingsForm();
+      draw();
+    });
+  }
+
+  if (settingsBtn) settingsBtn.onclick = () => openDialog(settingsDlg);
+  if (helpBtn) helpBtn.onclick = () => openDialog(helpDlg);
 
   // ---- setup, tabs, buttons ----
   document.querySelectorAll('input[name="mode"]').forEach(r => {
@@ -936,7 +1231,6 @@
       if (!MODES[r.value]) return;
       modeHelp.textContent = MODES[r.value].help;
       if (!running) { mode = r.value; updateHud(); }
-      startLevelSel.disabled = false;
     });
   });
 
@@ -948,15 +1242,16 @@
   });
 
   function setMuteLabel(m) {
-    muteBtn.textContent = m ? '🔇 Sound off' : '🔊 Sound on';
+    muteBtn.textContent = m ? '🔇 Muted' : '🔊 Sound';
     muteBtn.setAttribute('aria-pressed', m ? 'true' : 'false');
   }
+
   startBtn.onclick = () => {
     if (running && !gameOver) {
-      // Restart mid-game: show the setup screen rather than silently resetting.
-      paused = true;
-      running = false;
-      showOverlay('NEW GAME', 'Pick a mode, then press Start', 'Start', true);
+      // Mid-game: confirm rather than silently throwing the game away.
+      if (!paused) togglePause();
+      pendingRestart = true;
+      showOverlay('NEW GAME?', 'Your current game will be abandoned.', 'Start new', { setup: true, alt: 'Resume' });
       return;
     }
     startGame();
@@ -964,23 +1259,35 @@
   pauseBtn.onclick = togglePause;
   muteBtn.onclick = () => setMuteLabel(sound.toggle());
   overlayBtn.onclick = () => {
-    if (paused && running) togglePause();
+    if (paused && running && !pendingRestart) togglePause();
     else startGame();
   };
+  if (overlayAlt) overlayAlt.onclick = () => { if (paused) togglePause(); };
   setMuteLabel(sound.muted);
 
   // Pause automatically if the tab loses focus so a piece doesn't drop
   // through the floor while the player is away.
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && running && !paused) togglePause();
+    if (document.hidden && running && !paused && !gameOver) togglePause();
+  });
+
+  // Warn before leaving mid-game; the result is only saved at game end.
+  window.addEventListener('beforeunload', e => {
+    if (running && !gameOver && score > 0) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
   });
 
   // ---- initial paint ----
   board = createMatrix(COLS, ROWS);
   score = 0; lines = 0; level = 1; startLevel = 1; elapsed = 0;
   nextQueue = [];
+  restoreSetup();
   readSetup();
   updateHud();
-  draw();
-  showOverlay('TETRIS', 'Pick a mode, then press Start or Enter', 'Start', true);
+  fitAll();
+  if (window.ResizeObserver) new ResizeObserver(fitAll).observe(boardWrap);
+  window.addEventListener('resize', fitAll);
+  showOverlay('TETRIS', 'Pick a mode, then press Start or Enter', 'Start', { setup: true });
 })();

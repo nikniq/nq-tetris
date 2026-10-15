@@ -12,10 +12,15 @@ class GameController extends Controller
     {
         $leaderboards = [];
         foreach (Score::MODES as $mode) {
+            // One row per player: their best result in this mode. Ranked
+            // rows come back best-first, so the first per user is their best.
             $leaderboards[$mode] = Score::with('user:id,name')
                 ->ranked($mode)
-                ->limit(10)
-                ->get();
+                ->limit(500)
+                ->get()
+                ->unique('user_id')
+                ->take(10)
+                ->values();
         }
 
         $bests = array_fill_keys(Score::MODES, null);

@@ -88,7 +88,9 @@ class ScoreTest extends TestCase
         Score::create(['user_id' => $bob->id, 'mode' => 'ultra', 'score' => 12000, 'lines' => 50, 'level' => 1, 'duration_ms' => 120000]);
 
         $response = $this->get('/')->assertOk();
-        $response->assertSeeInOrder(['data-board="marathon"', 'Bob', '7,000', 'Alice', '4,500', 'Alice', '3,000'], false);
+        // One row per player: Alice's lower 3,000 run is not listed.
+        $response->assertSeeInOrder(['data-board="marathon"', 'Bob', '7,000', 'Alice', '4,500', 'data-board="sprint"'], false);
+        $response->assertDontSee('3,000');
         $response->assertSeeInOrder(['data-board="sprint"', 'Alice', '1:15.25', 'Bob', '1:30.50'], false);
         $response->assertDontSee('0:01.00');
         $response->assertSeeInOrder(['data-board="ultra"', 'Bob', '12,000'], false);
