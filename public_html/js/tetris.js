@@ -41,14 +41,18 @@
   const reducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
   const COLS = 10;
-  const ROWS = 20;
+  const ROWS = 20;               // visible rows
+  const BUFFER = 2;              // hidden rows above the board (the vanish zone)
+  const TOTAL_ROWS = ROWS + BUFFER;
   const BLOCK_SIZE = 32;
   const W = COLS * BLOCK_SIZE;   // logical board size; the backing store is scaled to fit
   const H = ROWS * BLOCK_SIZE;
   const HOLD_W = 128, HOLD_H = 96;
-  const NEXT_W = 128, NEXT_H = 288;
+  const NEXT_W = 128;
+  const SLOT_H = 64;             // height of one piece in the next queue
+  const QUEUE_LEN = 6;           // pieces generated ahead; settings.next of them are shown
   const PREVIEW_BLOCK = 24;
-  const NEXT_COUNT = 3;
+  const DEATH_ANIM = 700;        // ms for the stack to grey out on game over
   const LINES_PER_LEVEL = 10;
   const LINE_SCORES = [0, 100, 300, 500, 800];      // 0..4 lines, scaled by level
   const TSPIN_SCORES = [400, 800, 1200, 1600];       // full T-spin with 0..3 lines
@@ -62,7 +66,6 @@
     ultra:    { label: 'Ultra 2:00', help: 'Score as much as you can in two minutes. Speed stays fixed.', timeLabel: 'Left', timeLimit: 120000 },
   };
 
-  const SOFT_DROP_RATE = 45;
   const LOCK_DELAY = 500;   // ms a piece can rest before it locks
   const LOCK_RESETS = 15;   // moves/rotates that may postpone the lock
   const CLEAR_FLASH = 220;  // ms the cleared rows flash before collapsing
@@ -162,9 +165,13 @@
     countdown: true,
     das: 170,     // ms before a held left/right starts repeating
     arr: 40,      // ms between repeats once it has started (0 = instant)
+    sdr: 45,      // ms per row while soft dropping (0 = instant, no lock)
+    next: 5,      // pieces shown in the next queue
     volume: 60,   // percent
   };
   const settings = Object.assign({}, DEFAULT_SETTINGS, load('tetris.settings', {}));
+  settings.next = Math.min(QUEUE_LEN, Math.max(1, Math.round(settings.next) || DEFAULT_SETTINGS.next));
+  let nextH = SLOT_H * settings.next;
 
   // ---- sound (synthesised, no files to load) ----
   const sound = (() => {
@@ -249,6 +256,8 @@
   let lastWasRotate = false; // for T-spin detection
   let lastKick = 0;          // which kick the last rotation used
   let particles = [];
+  let deathStart = 0;    // when the game-over sweep began, 0 when not dying
+  let gameId = 0;        // bumps each game so stale timers can tell they're stale
 
   // Per-mode bests: players get theirs from the server, guests keep one
   // per mode in this browser.
@@ -300,12 +309,16 @@
       rot: 0,
       x: typeId === 4 ? 4 : 3, // guideline spawn columns
       y: 0,
+      lowest: 0,               // lowest row reached, for lock-delay resets
     };
   }
 
+  // Guideline gravity: seconds per row = (0.8 - (level - 1) * 0.007) ^ (level - 1).
+  // One second at level 1, about 64ms at 10, 7ms at 15, and under a
+  // millisecond from level 19, where pieces land the moment they appear.
   function dropIntervalFor(lvl) {
-    // Classic-ish curve: 800ms at level 1, ~100ms by level 10, floor 60ms.
-    return Math.max(60, Math.round(800 * Math.pow(0.82, lvl - 1)));
+    const l = Math.min(lvl, 20);
+    return Math.pow(0.8 - (l - 1) * 0.007, l - 1) * 1000;
   }
 
   function merge(board, piece) {
@@ -322,7 +335,7 @@
         if (!piece.shape[y][x]) continue;
         const by = y + piece.y;
         const bx = x + piece.x;
-        if (bx < 0 || bx >= COLS || by >= ROWS) return true;
+        if (bx < 0 || bx >= COLS || by >= TOTAL_ROWS) return true;
         if (by >= 0 && board[by][bx] !== 0) return true;
       }
     }
@@ -350,6 +363,16 @@
     }
   }
 
+  // Reaching a new lowest row refreshes the move/rotate allowance, so a
+  // piece working its way down a staircase isn't locked early.
+  function noteDescent() {
+    if (piece.y > piece.lowest) {
+      piece.lowest = piece.y;
+      lockResets = 0;
+      lockTimer = 0;
+    }
+  }
+
   function rotatePiece(dir) {
     if (piece.typeId === 4) return false; // O never changes
     const from = piece.rot;
@@ -366,6 +389,7 @@
         lastKick = i;
         lastWasRotate = true;
         sound.rotate();
+        noteDescent();
         touchLock();
         return true;
       }
@@ -400,7 +424,7 @@
     const cx = piece.x + 1, cy = piece.y + 1;
     const blocked = ([dx, dy]) => {
       const x = cx + dx, y = cy + dy;
-      return x < 0 || x >= COLS || y >= ROWS || (y >= 0 && board[y][x] !== 0);
+      return x < 0 || x >= COLS || y >= TOTAL_ROWS || (y >= 0 && board[y][x] !== 0);
     };
     const corners = [[-1,-1], [1,-1], [1,1], [-1,1]];
     if (corners.filter(blocked).length < 3) return null;
@@ -430,8 +454,13 @@
   function fitAll() {
     fit(canvas, ctx, W, H);
     fit(holdCv, holdCtx, HOLD_W, HOLD_H);
-    fit(nextCv, nextCtx, NEXT_W, NEXT_H);
+    fit(nextCv, nextCtx, NEXT_W, nextH);
     draw();
+  }
+
+  function applySettings() {
+    nextH = SLOT_H * settings.next;
+    fitAll();
   }
 
   // ---- drawing ----
@@ -482,11 +511,10 @@
 
   function drawPreviews() {
     nextCtx.fillStyle = '#0f1012';
-    nextCtx.fillRect(0, 0, NEXT_W, NEXT_H);
-    const slotH = NEXT_H / NEXT_COUNT;
-    (nextQueue || []).forEach((p, i) => {
-      nextCtx.globalAlpha = i === 0 ? 1 : 0.75;
-      drawPreviewPiece(nextCtx, NEXT_W, p, i, slotH);
+    nextCtx.fillRect(0, 0, NEXT_W, nextH);
+    (nextQueue || []).slice(0, settings.next).forEach((p, i) => {
+      nextCtx.globalAlpha = i === 0 ? 1 : 0.7;
+      drawPreviewPiece(nextCtx, NEXT_W, p, i, SLOT_H);
     });
     nextCtx.globalAlpha = 1;
 
@@ -547,28 +575,48 @@
     boardWrap.classList.add('shake');
   }
 
-  // 0 when the top four rows are empty, rising to 1 as the stack reaches
-  // the ceiling. Drives the red warning glow.
+  // 0 when the top four visible rows are empty, rising to 1 as the stack
+  // reaches the ceiling. Drives the red warning glow.
   function dangerLevel() {
-    for (let y = 0; y < 4; y++) if (board[y].some(v => v)) return (4 - y) / 4;
+    for (let y = 0; y < BUFFER + 4; y++) {
+      if (board[y].some(v => v)) return Math.min(1, (BUFFER + 4 - y) / 4);
+    }
     return 0;
+  }
+
+  function drawBoard(now) {
+    if (!deathStart) {
+      drawMatrix(ctx, board, { x: 0, y: 0 }, BLOCK_SIZE);
+      return;
+    }
+    // Game-over sweep: the stack greys out from the bottom up.
+    const p = Math.min(1, (now - deathStart) / DEATH_ANIM);
+    const cut = TOTAL_ROWS - Math.ceil(p * TOTAL_ROWS);
+    board.forEach((row, y) => row.forEach((v, x) => {
+      if (v) drawCell(ctx, x, y, BLOCK_SIZE, y >= cut ? '#4a525d' : COLORS[v]);
+    }));
+  }
+
+  // Blocks resting in the hidden rows can't be seen, so mark their columns
+  // with a red notch on the top edge.
+  function drawSkyline() {
+    ctx.fillStyle = '#ff5c7a';
+    for (let x = 0; x < COLS; x++) {
+      for (let y = 0; y < BUFFER; y++) {
+        if (board[y][x]) { ctx.fillRect(x * BLOCK_SIZE + 2, 0, BLOCK_SIZE - 4, 4); break; }
+      }
+    }
   }
 
   function draw(now = performance.now()) {
     ctx.fillStyle = '#0f1012';
     ctx.fillRect(0, 0, W, H);
     if (settings.grid) drawGrid();
-    drawMatrix(ctx, board, { x: 0, y: 0 }, BLOCK_SIZE);
 
-    const danger = running && !gameOver ? dangerLevel() : 0;
-    if (danger > 0) {
-      const g = ctx.createLinearGradient(0, 0, 0, H * 0.35);
-      g.addColorStop(0, `rgba(255, 60, 90, ${0.35 * danger})`);
-      g.addColorStop(1, 'rgba(255, 60, 90, 0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, W, H * 0.35);
-    }
-
+    // Board coordinates include the hidden rows; shift them out of view.
+    ctx.save();
+    ctx.translate(0, -BUFFER * BLOCK_SIZE);
+    drawBoard(now);
     if (clearing) {
       // Flash the full rows white/transparent at ~12Hz until they collapse.
       const on = Math.floor((clearing.until - now) / 40) % 2 === 0;
@@ -580,8 +628,19 @@
       const alpha = grounded() ? 1 - 0.35 * (lockTimer / LOCK_DELAY) : 1;
       drawMatrix(ctx, piece.shape, { x: piece.x, y: piece.y }, BLOCK_SIZE, alpha);
     }
-
     drawParticles();
+    ctx.restore();
+
+    drawSkyline();
+    const danger = running && !gameOver ? dangerLevel() : 0;
+    if (danger > 0) {
+      const g = ctx.createLinearGradient(0, 0, 0, H * 0.35);
+      g.addColorStop(0, `rgba(255, 60, 90, ${0.35 * danger})`);
+      g.addColorStop(1, 'rgba(255, 60, 90, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H * 0.35);
+    }
+
     drawPreviews();
   }
 
@@ -654,16 +713,27 @@
     piece = nextQueue.shift();
     nextQueue.push(makePiece(nextTypeId()));
     holdUsed = false;
+    enterPlay();
+  }
+
+  // Put the current piece at the top. It appears in the hidden rows and
+  // drops one row at once if it can, so its lower edge shows on the board.
+  // The game only ends here if the spawn position itself is blocked.
+  function enterPlay() {
     lockTimer = 0;
     lockResets = 0;
     dropCounter = 0;
     lastWasRotate = false;
-    if (collide(board, piece)) endGame(false);
+    piece.y = 0;
+    if (collide(board, piece)) { endGame(false); return; }
+    piece.y++;
+    if (collide(board, piece)) piece.y--;
+    piece.lowest = piece.y;
   }
 
   function fullRows() {
     const rows = [];
-    for (let y = 0; y < ROWS; y++) if (board[y].every(v => v !== 0)) rows.push(y);
+    for (let y = 0; y < TOTAL_ROWS; y++) if (board[y].every(v => v !== 0)) rows.push(y);
     return rows;
   }
 
@@ -671,6 +741,11 @@
     const tspin = tSpinType();
     merge(board, piece);
     pieces++;
+    // Lock out: a piece that settles entirely in the hidden rows ends the game.
+    if (piece.shape.every((row, y) => row.every(v => !v || piece.y + y < BUFFER))) {
+      endGame(false);
+      return;
+    }
     const rows = fullRows();
     if (rows.length === 0) {
       if (tspin) {
@@ -760,6 +835,7 @@
     }
     score += 1;
     lastWasRotate = false;
+    noteDescent();
     updateHud();
     dropCounter = 0;
     return true;
@@ -770,6 +846,7 @@
     if (target > piece.y) lastWasRotate = false;
     score += (target - piece.y) * 2;
     piece.y = target;
+    updateHud(); // show the drop points now, not at the next line clear
     sound.drop();
     shake();
     lockPiece();
@@ -787,11 +864,8 @@
       nextQueue.push(makePiece(nextTypeId()));
     }
     holdUsed = true;
-    lockTimer = 0;
-    lockResets = 0;
-    lastWasRotate = false;
     sound.hold();
-    if (collide(board, piece)) endGame(false);
+    enterPlay();
   }
 
   function update(time = 0) {
@@ -837,11 +911,15 @@
         } else {
           lockTimer = 0;
           dropCounter += delta;
-          if (dropCounter > dropIntervalFor(level)) {
+          const interval = dropIntervalFor(level);
+          // At high levels several rows pass in one frame; fall until landing.
+          while (dropCounter >= interval && !grounded()) {
             piece.y++;
+            dropCounter -= interval;
             lastWasRotate = false;
-            dropCounter = 0;
+            noteDescent();
           }
+          if (grounded()) dropCounter = 0;
         }
       }
     }
@@ -873,7 +951,9 @@
     sound.unlock();
     readSetup();
     save('tetris.setup', { mode, level: startLevel });
-    board = createMatrix(COLS, ROWS);
+    gameId++;
+    deathStart = 0;
+    board = createMatrix(COLS, TOTAL_ROWS);
     bag = [];
     score = 0;
     lines = 0;
@@ -896,7 +976,7 @@
     running = true;
     held.clear();
     nextQueue = [];
-    for (let i = 0; i < NEXT_COUNT; i++) nextQueue.push(makePiece(nextTypeId()));
+    for (let i = 0; i < QUEUE_LEN; i++) nextQueue.push(makePiece(nextTypeId()));
     spawn();
     updateHud();
     saveStatus.textContent = '';
@@ -973,8 +1053,27 @@
     }
     if (isBest) text += ' · New best!';
     renderSummary();
-    showOverlay(title, text, 'Play again', { setup: true, summary: true });
     submitScore(won);
+
+    const show = () => showOverlay(title, text, 'Play again', { setup: true, summary: true });
+    if (won) { show(); return; }
+    if (!settings.effects) {
+      deathStart = performance.now() - DEATH_ANIM; // grey at once, no sweep
+      draw();
+      show();
+      return;
+    }
+    // Let the stack grey out before the results cover the board. Starting a
+    // new game in the meantime bumps gameId, which cancels both callbacks.
+    const id = gameId;
+    deathStart = performance.now();
+    const sweep = t => {
+      if (id !== gameId) return;
+      draw(t);
+      if (t - deathStart < DEATH_ANIM) requestAnimationFrame(sweep);
+    };
+    requestAnimationFrame(sweep);
+    setTimeout(() => { if (id === gameId && gameOver) show(); }, DEATH_ANIM + 150);
   }
 
   async function submitScore(won) {
@@ -1019,7 +1118,10 @@
     switch (action) {
       case 'left':  move(-1); break;
       case 'right': move(1); break;
-      case 'down':  softDrop(); break;
+      case 'down':
+        if (settings.sdr === 0) { while (softDrop()) { /* fall to the floor */ } }
+        else softDrop();
+        break;
       case 'cw':    rotatePiece(1); break;
       case 'ccw':   rotatePiece(-1); break;
       case 'drop':  hardDrop(); break;
@@ -1048,15 +1150,16 @@
       if (action !== 'left' && action !== 'right' && action !== 'down') continue;
       h.elapsed += delta;
       const start = action === 'down' ? 0 : settings.das;
-      const rate = action === 'down' ? SOFT_DROP_RATE : settings.arr;
+      const rate = action === 'down' ? settings.sdr : settings.arr;
       if (!h.repeating) {
         if (h.elapsed < start) continue;
         h.repeating = true;
         h.elapsed = 0;
       }
       if (rate === 0) {
-        // Instant auto-repeat: slide to the wall.
-        while (piece && !clearing && move(action === 'left' ? -1 : 1)) { /* keep going */ }
+        // Instant: slide to the wall, or fall to the floor without locking.
+        if (action === 'down') { while (piece && !clearing && softDrop()) { /* fall */ } }
+        else { while (piece && !clearing && move(action === 'left' ? -1 : 1)) { /* slide */ } }
         h.elapsed = 0;
         continue;
       }
@@ -1105,6 +1208,11 @@
     if (e.key === '?') {
       e.preventDefault();
       openDialog(helpDlg);
+      return;
+    }
+    if (e.key === 'r' || e.key === 'R') {
+      e.preventDefault();
+      requestNewGame(false);
       return;
     }
     const action = KEYMAP[e.key];
@@ -1180,12 +1288,15 @@
     countdown: ['set-countdown', 'bool'],
     das:       ['set-das', 'num'],
     arr:       ['set-arr', 'num'],
+    sdr:       ['set-sdr', 'num'],
+    next:      ['set-next', 'num'],
     volume:    ['set-volume', 'num'],
   };
 
   function formatSetting(key, v) {
-    if (key === 'arr' && v === 0) return 'instant';
-    if (key === 'das' || key === 'arr') return `${v} ms`;
+    if ((key === 'arr' || key === 'sdr') && v === 0) return 'instant';
+    if (key === 'das' || key === 'arr' || key === 'sdr') return `${v} ms`;
+    if (key === 'next') return v === 1 ? '1 piece' : `${v} pieces`;
     if (key === 'volume') return `${v}%`;
     return '';
   }
@@ -1208,7 +1319,7 @@
       settings[key] = kind === 'bool' ? input.checked : Number(input.value);
       save('tetris.settings', settings);
       syncSettingsForm();
-      draw();
+      applySettings();
     });
   }
 
@@ -1218,7 +1329,7 @@
       Object.assign(settings, DEFAULT_SETTINGS);
       save('tetris.settings', settings);
       syncSettingsForm();
-      draw();
+      applySettings();
     });
   }
 
@@ -1246,16 +1357,18 @@
     muteBtn.setAttribute('aria-pressed', m ? 'true' : 'false');
   }
 
-  startBtn.onclick = () => {
-    if (running && !gameOver) {
-      // Mid-game: confirm rather than silently throwing the game away.
-      if (!paused) togglePause();
-      pendingRestart = true;
-      showOverlay('NEW GAME?', 'Your current game will be abandoned.', 'Start new', { setup: true, alt: 'Resume' });
-      return;
-    }
-    startGame();
-  };
+  // New game / quick retry. Sprint and Ultra runs are short and players
+  // restart them constantly, so R restarts those at once. A Marathon in
+  // progress, or the New game button, asks first.
+  function requestNewGame(fromButton) {
+    if (!running || gameOver || pendingRestart) { startGame(); return; }
+    if (!fromButton && mode !== 'marathon') { startGame(); return; }
+    if (!paused) togglePause();
+    pendingRestart = true;
+    showOverlay('NEW GAME?', 'Your current game will be abandoned.', 'Start new', { setup: true, alt: 'Resume' });
+  }
+
+  startBtn.onclick = () => requestNewGame(true);
   pauseBtn.onclick = togglePause;
   muteBtn.onclick = () => setMuteLabel(sound.toggle());
   overlayBtn.onclick = () => {
@@ -1280,7 +1393,7 @@
   });
 
   // ---- initial paint ----
-  board = createMatrix(COLS, ROWS);
+  board = createMatrix(COLS, TOTAL_ROWS);
   score = 0; lines = 0; level = 1; startLevel = 1; elapsed = 0;
   nextQueue = [];
   restoreSetup();

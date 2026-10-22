@@ -20,7 +20,7 @@
         </div>
         <div class="panel">
           <h2>Next</h2>
-          <canvas id="next" width="128" height="288" aria-hidden="true"></canvas>
+          <canvas id="next" width="128" height="320" aria-hidden="true"></canvas>
         </div>
       </aside>
 
@@ -58,7 +58,7 @@
               <button id="overlay-btn" type="button">Start</button>
               <button id="overlay-alt" type="button" class="secondary" hidden>Resume</button>
             </div>
-            <p class="overlay-hint"><kbd>Enter</kbd> start · <kbd>Esc</kbd> pause · <kbd>?</kbd> help</p>
+            <p class="overlay-hint"><kbd>Enter</kbd> start · <kbd>R</kbd> retry · <kbd>Esc</kbd> pause · <kbd>?</kbd> help</p>
           </div>
         </div>
       </div>
@@ -100,6 +100,7 @@
               <dt>Space</dt><dd>Hard drop</dd>
               <dt>C</dt><dd>Hold</dd>
               <dt>P / Esc</dt><dd>Pause</dd>
+              <dt>R</dt><dd>Retry</dd>
               <dt>M</dt><dd>Mute</dd>
               <dt>?</dt><dd>Help</dd>
             </dl>
@@ -187,6 +188,10 @@
         <label class="toggle"><input type="checkbox" id="set-grid" /> Grid lines</label>
         <label class="toggle"><input type="checkbox" id="set-effects" /> Particles and screen shake</label>
         <label class="toggle"><input type="checkbox" id="set-countdown" /> 3-2-1 countdown before each game</label>
+        <label class="range">
+          <span>Next queue <output id="set-next-out"></output></span>
+          <input type="range" id="set-next" min="1" max="6" step="1" />
+        </label>
       </fieldset>
 
       <fieldset>
@@ -200,6 +205,11 @@
           <span>Auto-repeat speed <output id="set-arr-out"></output></span>
           <input type="range" id="set-arr" min="0" max="100" step="5" />
           <small>Time between steps while sliding. 0 moves straight to the wall.</small>
+        </label>
+        <label class="range">
+          <span>Soft drop speed <output id="set-sdr-out"></output></span>
+          <input type="range" id="set-sdr" min="0" max="60" step="5" />
+          <small>Time per row while holding down. 0 drops to the floor without locking.</small>
         </label>
       </fieldset>
 
@@ -223,11 +233,12 @@
   <dialog id="help-dialog" class="dialog" aria-labelledby="help-title">
     <form method="dialog">
       <h2 id="help-title" class="dialog-title">How to play</h2>
-      <p>Move and rotate the falling pieces to fill complete rows. Full rows clear and score points. The game ends when the stack reaches the top.</p>
+      <p>Move and rotate the falling pieces to fill complete rows. Full rows clear and score points.</p>
+      <p>Pieces enter from just above the board. The game ends when a new piece has no room to appear, or a piece locks entirely above the top edge. A red notch on the top edge marks a column stacked above the board.</p>
 
       <h3>Modes</h3>
       <dl class="help-list">
-        <dt>Marathon</dt><dd>Endless. The speed rises every 10 lines. Ranked by score.</dd>
+        <dt>Marathon</dt><dd>Endless. The speed rises every 10 lines, and from level 19 pieces land the moment they appear. Ranked by score.</dd>
         <dt>Sprint 40</dt><dd>Clear 40 lines as fast as possible. Ranked by time.</dd>
         <dt>Ultra 2:00</dt><dd>Two minutes to score as much as possible. Ranked by score.</dd>
       </dl>
@@ -241,6 +252,7 @@
         <dt>Space</dt><dd>Hard drop, 2 points per row</dd>
         <dt>C or Shift</dt><dd>Hold the piece for later, once per piece</dd>
         <dt>P or Esc</dt><dd>Pause</dd>
+        <dt>R</dt><dd>Retry. Instant in Sprint and Ultra, asks first in Marathon.</dd>
         <dt>M</dt><dd>Mute</dd>
         <dt>Touch</dt><dd>Tap the board to rotate, swipe to move, flick down to drop</dd>
       </dl>
