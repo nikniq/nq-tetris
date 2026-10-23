@@ -5,6 +5,9 @@
 @section('content')
   <div class="auth-card">
     <h1>Log in</h1>
+
+    @include('auth.partials.google', ['label' => 'Continue with Google'])
+
     <form method="POST" action="{{ route('login') }}">
       @csrf
       <label>
@@ -19,13 +22,16 @@
       </label>
       @error('password') <p class="error">{{ $message }}</p> @enderror
 
-      <label class="check">
-        <input type="checkbox" name="remember" value="1" {{ old('remember') ? 'checked' : '' }} />
-        Remember me
-      </label>
+      <div class="row-between">
+        <label class="check">
+          <input type="checkbox" name="remember" value="1" {{ old('remember') ? 'checked' : '' }} />
+          Remember me
+        </label>
+        <a href="{{ route('password.forgot') }}" class="small-link">Forgot password?</a>
+      </div>
 
       <button type="submit">Log in</button>
     </form>
-    <p class="hint">No account? <a href="{{ route('register') }}">Register</a></p>
+    <p class="hint">No account? <a href="{{ route('register') }}">Create one</a></p>
   </div>
 @endsection

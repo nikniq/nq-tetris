@@ -4,11 +4,15 @@
 
 @section('content')
   <div class="auth-card">
-    <h1>Register</h1>
+    <h1>Create account</h1>
+    <p class="lead">We will email you a link to confirm your address. You choose a password after that.</p>
+
+    @include('auth.partials.google', ['label' => 'Continue with Google'])
+
     <form method="POST" action="{{ route('register') }}">
       @csrf
       <label>
-        Display name
+        Display name <small>(shown on the leaderboard)</small>
         <input type="text" name="name" value="{{ old('name') }}" required autofocus maxlength="50" autocomplete="nickname" />
       </label>
       @error('name') <p class="error">{{ $message }}</p> @enderror
@@ -19,18 +23,7 @@
       </label>
       @error('email') <p class="error">{{ $message }}</p> @enderror
 
-      <label>
-        Password <small>(at least 8 characters)</small>
-        <input type="password" name="password" required autocomplete="new-password" />
-      </label>
-      @error('password') <p class="error">{{ $message }}</p> @enderror
-
-      <label>
-        Confirm password
-        <input type="password" name="password_confirmation" required autocomplete="new-password" />
-      </label>
-
-      <button type="submit">Create account</button>
+      <button type="submit">Send confirmation link</button>
     </form>
     <p class="hint">Already registered? <a href="{{ route('login') }}">Log in</a></p>
   </div>

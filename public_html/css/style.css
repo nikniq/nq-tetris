@@ -557,3 +557,53 @@ dialog legend { padding: 0 6px; color: var(--muted); font-size: 0.78rem; letter-
   .combo { transition: none; }
   button { transition: none; }
 }
+
+/* ---- auth extras ---- */
+.auth-card .lead { color: var(--muted); font-size: 0.92rem; line-height: 1.45; margin: -8px 0 18px; }
+.google-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f1f1f;
+  font-weight: 600;
+  border: 1px solid #d0d5dd;
+}
+.google-btn:hover { background: #f2f4f7; text-decoration: none; }
+.or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.or::before, .or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.row-between .check { margin: 0; }
+.small-link { font-size: 0.85rem; }
+.flash.notice { background: #3b2f0f; border-color: #c99a2e; }
+.flash a { font-weight: bold; }
+
+/* ---- account page ---- */
+.auth-card.account { max-width: 520px; }
+.account-head { display: flex; align-items: center; gap: 16px; margin-bottom: 8px; }
+.account-head h1 { margin: 0 0 4px; }
+.avatar { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; background: var(--panel-2); border: 1px solid var(--line); flex-shrink: 0; }
+.avatar.initial { display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.4rem; color: var(--accent); }
+.avatar.tiny { width: 22px; height: 22px; vertical-align: middle; margin-right: 6px; border: none; }
+#topbar .who { display: inline-flex; align-items: center; }
+.account section { border-top: 1px solid var(--line); padding: 18px 0 6px; margin-top: 10px; }
+.account section h2 { margin-bottom: 12px; }
+.account section form { display: flex; flex-direction: column; }
+.account section button { align-self: flex-start; width: auto; }
+.account .danger-zone h2 { color: var(--danger); }
+button.danger { background: var(--danger); color: #fff; }
+button.danger:hover { background: #e0405f; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }

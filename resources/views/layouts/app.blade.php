@@ -22,7 +22,12 @@
     <a href="{{ route('tetris') }}" class="brand">TETRIS</a>
     <nav>
       @auth
-        <span class="who">{{ auth()->user()->name }}</span>
+        <a href="{{ route('account') }}" class="who" title="Account">
+          @if (auth()->user()->avatar)
+            <img src="{{ auth()->user()->avatar }}" alt="" class="avatar tiny" referrerpolicy="no-referrer" />
+          @endif
+          {{ auth()->user()->name }}
+        </a>
         <form method="POST" action="{{ route('logout') }}" class="inline">
           @csrf
           <button type="submit" class="link">Log out</button>
@@ -35,8 +40,17 @@
   </header>
 
   @if (session('status'))
-    <div class="flash">{{ session('status') }}</div>
+    <div class="flash" role="status">{{ session('status') }}</div>
   @endif
+
+  @auth
+    @if (! auth()->user()->hasPassword() && ! request()->routeIs('password.set', 'account'))
+      <div class="flash notice">
+        You have not set a password yet.
+        <a href="{{ route('password.set') }}">Set one now</a> so you can log in without an email link{{ auth()->user()->google_id ? ' or Google' : '' }}.
+      </div>
+    @endif
+  @endauth
 
   <main>
     @yield('content')
