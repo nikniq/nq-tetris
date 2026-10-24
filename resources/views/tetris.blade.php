@@ -288,5 +288,5 @@
       bests: @json(collect($bests)->map(fn ($s) => $s ? ['score' => $s->score, 'duration_ms' => $s->duration_ms] : null)),
     };
   </script>
-  <script src="{{ asset('js/tetris.js') }}"></script>
+  <script src="{{ asset('js/tetris.js') }}?v={{ filemtime(public_path('js/tetris.js')) }}"></script>
 @endpush
