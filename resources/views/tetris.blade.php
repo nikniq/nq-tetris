@@ -150,7 +150,7 @@
                 @endforeach
               </ol>
             @endif
-            <p class="board-note">Each player's best result is shown once.</p>
+            <p class="board-note">Each player's best result is shown once. <a href="{{ route('leaderboard', $mode === 'marathon' ? [] : ['mode' => $mode]) }}">Full leaderboard</a></p>
           </div>
         @endforeach
       </div>

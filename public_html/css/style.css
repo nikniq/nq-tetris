@@ -607,3 +607,47 @@ dialog legend { padding: 0 6px; color: var(--muted); font-size: 0.78rem; letter-
 button.danger { background: var(--danger); color: #fff; }
 button.danger:hover { background: #e0405f; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---- full leaderboard page ---- */
+#topbar nav a.active { color: var(--text); font-weight: bold; }
+.card.leaderboard.full { max-width: 760px; margin: 0 auto; width: 100%; }
+.lb-title { margin: 0 0 4px; font-size: 1.3rem; letter-spacing: 2px; color: var(--accent); }
+.tabs a.tab { text-decoration: none; }
+.my-rank {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--accent-dark);
+  font-size: 0.92rem;
+}
+.rank-badge { background: var(--accent); color: var(--panel); font-weight: 800; padding: 2px 8px; border-radius: 6px; }
+.lb-rows { margin: 0; padding: 0; list-style: none; }
+.lb-rows li {
+  display: grid;
+  grid-template-columns: 2em 1fr auto auto 5em;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.92rem;
+}
+.lb-rows li:nth-child(odd) { background: var(--panel-2); }
+.lb-rows li.me { outline: 1px solid var(--accent-dark); }
+.lb-rows li.me .name { color: var(--accent); font-weight: bold; }
+.lb-rows .rank { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.lb-rows li:nth-child(1) .rank { color: #ffd54a; font-weight: bold; }
+.lb-rows li:nth-child(2) .rank { color: #cfd8dc; font-weight: bold; }
+.lb-rows li:nth-child(3) .rank { color: #d08a4e; font-weight: bold; }
+.who-cell { display: flex; align-items: center; min-width: 0; }
+.lb-rows .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-rows .meta { color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
+.lb-rows .pts { font-variant-numeric: tabular-nums; font-weight: bold; text-align: right; }
+.lb-rows .when { color: var(--muted); font-size: 0.75rem; text-align: right; white-space: nowrap; }
+@media (max-width: 600px) {
+  .lb-rows li { grid-template-columns: 2em 1fr auto; }
+  .lb-rows .meta, .lb-rows .when { display: none; }
+}

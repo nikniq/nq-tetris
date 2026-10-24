@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#15171a"/>
+  <g>
+    <!-- T piece -->
+    <rect x="22" y="10" width="20" height="20" rx="2" fill="#a000f0"/>
+    <rect x="22" y="10" width="20" height="4" rx="2" fill="#fff" opacity=".25"/>
+    <rect x="12" y="30" width="20" height="20" rx="2" fill="#a000f0"/>
+    <rect x="12" y="30" width="20" height="4" rx="2" fill="#fff" opacity=".25"/>
+    <rect x="32" y="30" width="20" height="20" rx="2" fill="#a000f0"/>
+    <rect x="32" y="30" width="20" height="4" rx="2" fill="#fff" opacity=".25"/>
+    <!-- I piece along the bottom, in the accent colour -->
+    <rect x="2" y="52" width="60" height="10" rx="2" fill="#00eaff"/>
+    <rect x="2" y="52" width="60" height="3" rx="2" fill="#fff" opacity=".3"/>
+  </g>
+  <g stroke="#15171a" stroke-width="1.5" fill="none">
+    <line x1="32" y1="10" x2="32" y2="30"/>
+    <line x1="22" y1="30" x2="22" y2="50"/><line x1="32" y1="30" x2="32" y2="50"/><line x1="42" y1="30" x2="42" y2="50"/>
+    <line x1="17" y1="52" x2="17" y2="62"/><line x1="32" y1="52" x2="32" y2="62"/><line x1="47" y1="52" x2="47" y2="62"/>
+  </g>
+</svg>

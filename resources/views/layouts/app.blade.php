@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <title>@yield('title', 'Tetris')</title>
+  <meta name="theme-color" content="#15171a" />
+  <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="48x48" />
+  <link rel="icon" href="{{ asset('favicon.svg') }}" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}" />
+  <link rel="manifest" href="{{ asset('manifest.webmanifest') }}" />
   <link rel="stylesheet" href="{{ asset('css/style.css') }}?v={{ filemtime(public_path('css/style.css')) }}" />
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-34RWEG01MV"></script>
@@ -21,6 +26,7 @@
   <header id="topbar">
     <a href="{{ route('tetris') }}" class="brand">TETRIS</a>
     <nav>
+      <a href="{{ route('leaderboard') }}" @class(['active' => request()->routeIs('leaderboard')])>Leaderboard</a>
       @auth
         <a href="{{ route('account') }}" class="who" title="Account">
           @if (auth()->user()->avatar)

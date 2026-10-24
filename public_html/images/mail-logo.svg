@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 96">
+  <rect width="320" height="96" rx="18" fill="#15171a"/>
+  <!-- mark -->
+  <g transform="translate(16 16)">
+    <rect x="20" y="0" width="22" height="22" rx="2" fill="#a000f0"/>
+    <rect x="0" y="22" width="22" height="22" rx="2" fill="#a000f0"/>
+    <rect x="22" y="22" width="22" height="22" rx="2" fill="#a000f0"/>
+    <rect x="44" y="22" width="22" height="22" rx="2" fill="#a000f0"/>
+    <rect x="0" y="46" width="66" height="18" rx="2" fill="#00eaff"/>
+    <g fill="#fff" opacity=".25">
+      <rect x="20" y="0" width="22" height="4"/><rect x="0" y="22" width="66" height="4"/><rect x="0" y="46" width="66" height="4"/>
+    </g>
+    <g stroke="#15171a" stroke-width="2"><line x1="22" y1="22" x2="22" y2="44"/><line x1="44" y1="22" x2="44" y2="44"/><line x1="22" y1="46" x2="22" y2="64"/><line x1="44" y1="46" x2="44" y2="64"/></g>
+  </g>
+  <text x="104" y="62" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="40" font-weight="800" letter-spacing="6" fill="#00eaff">TETRIS</text>
+</svg>
