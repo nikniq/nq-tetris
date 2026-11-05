@@ -36,6 +36,10 @@
   const helpBtn = $('help-btn');
   const settingsDlg = $('settings-dialog');
   const helpDlg = $('help-dialog');
+  const progressElem = $('progress-bar');
+  const progressLabel = $('progress-label');
+  const keysList = $('keys-list');
+  const keybindsElem = $('keybinds');
 
   const CONFIG = window.TETRIS || { authenticated: false, bests: {} };
   const reducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -64,22 +68,28 @@
     marathon: { label: 'Marathon', help: 'Endless. Speed rises every 10 lines.', timeLabel: 'Time' },
     sprint:   { label: 'Sprint 40', help: 'Clear 40 lines as fast as you can. Speed stays fixed.', timeLabel: 'Time', targetLines: 40 },
     ultra:    { label: 'Ultra 2:00', help: 'Score as much as you can in two minutes. Speed stays fixed.', timeLabel: 'Left', timeLimit: 120000 },
+    zen:      { label: 'Zen', help: 'No pressure. The board clears itself when it fills up. Not ranked.', timeLabel: 'Time', practice: true },
   };
 
   const LOCK_DELAY = 500;   // ms a piece can rest before it locks
   const LOCK_RESETS = 15;   // moves/rotates that may postpone the lock
   const CLEAR_FLASH = 220;  // ms the cleared rows flash before collapsing
 
-  const COLORS = [
-    null,
-    '#00f0f0', // I
-    '#0000f0', // J
-    '#f0a000', // L
-    '#f0f000', // O
-    '#00f000', // S
-    '#a000f0', // T
-    '#f00000', // Z
-  ];
+  const PALETTES = {
+    classic: [
+      null,
+      '#00f0f0', // I
+      '#0000f0', // J
+      '#f0a000', // L
+      '#f0f000', // O
+      '#00f000', // S
+      '#a000f0', // T
+      '#f00000', // Z
+    ],
+    // Okabe-Ito colours: distinguishable with the common forms of colour blindness.
+    safe: [null, '#56b4e9', '#0072b2', '#e69f00', '#f0e442', '#009e73', '#cc79a7', '#d55e00'],
+  };
+  let COLORS = PALETTES.classic;
 
   // Spawn orientations match the Super Rotation System, so rotating the
   // bounding box gives the SRS states directly.
@@ -168,8 +178,34 @@
     sdr: 45,      // ms per row while soft dropping (0 = instant, no lock)
     next: 5,      // pieces shown in the next queue
     volume: 60,   // percent
+    safeColors: false, // colour-blind friendly palette
+    haptics: true,     // vibrate on touch controls where the device supports it
   };
+  const DEFAULT_KEYS = {
+    left: ['ArrowLeft'], right: ['ArrowRight'], down: ['ArrowDown'],
+    cw: ['ArrowUp', 'x'], ccw: ['z'], drop: [' '], hold: ['c', 'Shift'],
+  };
+  const ACTION_LABELS = {
+    left: 'Move left', right: 'Move right', down: 'Soft drop',
+    cw: 'Rotate', ccw: 'Rotate back', drop: 'Hard drop', hold: 'Hold',
+  };
+  // Keys with a fixed job; they cannot be assigned to a game action.
+  const RESERVED_KEYS = ['Enter', 'Escape', 'Tab', 'p', 'm', 'r', '?'];
+  const normKey = k => (k.length === 1 ? k.toLowerCase() : k);
+  const keyLabel = k => ({ ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', ' ': 'Space' }[k] || (k.length === 1 ? k.toUpperCase() : k));
+
   const settings = Object.assign({}, DEFAULT_SETTINGS, load('tetris.settings', {}));
+  // Bindings: start from the defaults, then take any saved action that is a
+  // non-empty list of keys, so a damaged or older save can't unbind a control.
+  settings.keys = (saved => {
+    const keys = {};
+    for (const a of Object.keys(DEFAULT_KEYS)) {
+      const v = saved && saved[a];
+      keys[a] = Array.isArray(v) && v.length && v.every(k => typeof k === 'string') ? v.map(normKey) : DEFAULT_KEYS[a].slice();
+    }
+    return keys;
+  })(settings.keys);
+  COLORS = settings.safeColors ? PALETTES.safe : PALETTES.classic;
   settings.next = Math.min(QUEUE_LEN, Math.max(1, Math.round(settings.next) || DEFAULT_SETTINGS.next));
   let nextH = SLOT_H * settings.next;
 
@@ -460,6 +496,7 @@
 
   function applySettings() {
     nextH = SLOT_H * settings.next;
+    COLORS = settings.safeColors ? PALETTES.safe : PALETTES.classic;
     fitAll();
   }
 
@@ -658,11 +695,30 @@
     timeLabel.textContent = MODES[mode].timeLabel;
     timeElem.textContent = fmtTime(MODES[mode].timeLimit ? MODES[mode].timeLimit - elapsed : elapsed);
     bestModeElem.textContent = MODES[mode].label;
-    // While playing marathon/ultra, show the live best if this run beats it.
-    if (mode !== 'sprint' && running && (!bests[mode] || score > bests[mode].score)) {
+    updateProgress();
+    if (MODES[mode].practice) {
+      bestElem.textContent = '—';
+    } else if (mode !== 'sprint' && running && (!bests[mode] || score > bests[mode].score)) {
+      // While playing marathon/ultra, show the live best if this run beats it.
       bestElem.textContent = score.toLocaleString();
     } else {
       bestElem.textContent = bestLabel(mode);
+    }
+  }
+
+  // Thin bar under the stats: lines towards the next level in Marathon,
+  // towards 40 in Sprint, and time used in Ultra.
+  function updateProgress() {
+    if (!progressElem) return;
+    let f = 0;
+    if (mode === 'marathon') f = (lines % LINES_PER_LEVEL) / LINES_PER_LEVEL;
+    else if (MODES[mode].targetLines) f = lines / MODES[mode].targetLines;
+    else if (MODES[mode].timeLimit) f = elapsed / MODES[mode].timeLimit;
+    progressElem.style.width = (Math.max(0, Math.min(1, f)) * 100).toFixed(1) + '%';
+    if (progressLabel) {
+      progressLabel.textContent = mode === 'marathon' ? `${LINES_PER_LEVEL - (lines % LINES_PER_LEVEL)} lines to level ${level + 1}`
+        : MODES[mode].targetLines ? `${Math.max(0, MODES[mode].targetLines - lines)} lines to go`
+        : MODES[mode].timeLimit ? 'Time used' : 'Zen: play as long as you like';
     }
   }
 
@@ -925,7 +981,10 @@
     }
 
     updateParticles(delta);
-    if (running) timeElem.textContent = fmtTime(limit ? limit - elapsed : elapsed);
+    if (running) {
+      timeElem.textContent = fmtTime(limit ? limit - elapsed : elapsed);
+      if (limit) updateProgress();
+    }
     draw(time);
     if (running) requestAnimationFrame(update);
   }
@@ -1030,6 +1089,16 @@
   }
 
   function endGame(won) {
+    if (!won && MODES[mode].practice) {
+      board = createMatrix(COLS, TOTAL_ROWS);
+      clearing = null;
+      combo = -1;
+      backToBack = false;
+      flashCombo('Board cleared. Keep going.');
+      sound.level();
+      spawn();
+      return;
+    }
     running = false;
     gameOver = true;
     pendingRestart = false;
@@ -1170,13 +1239,76 @@
     }
   }
 
-  const KEYMAP = {
-    ArrowLeft: 'left', ArrowRight: 'right', ArrowDown: 'down',
-    ArrowUp: 'cw', x: 'cw', X: 'cw',
-    z: 'ccw', Z: 'ccw',
-    ' ': 'drop',
-    c: 'hold', C: 'hold', Shift: 'hold',
-  };
+  let KEYMAP = {};
+  function buildKeymap() {
+    KEYMAP = {};
+    for (const [action, keys] of Object.entries(settings.keys)) for (const k of keys) KEYMAP[k] = action;
+    renderKeys();
+  }
+  const actionFor = e => KEYMAP[normKey(e.key)];
+
+  // The Keys panel and the Settings rows are drawn from the live bindings,
+  // so they never disagree with what the keys actually do.
+  function renderKeys() {
+    const show = a => settings.keys[a].map(keyLabel).join(' / ');
+    if (keysList) {
+      const rows = [
+        [`${show('left')} ${show('right')}`, 'Move'], [show('cw'), 'Rotate'], [show('ccw'), 'Rotate back'],
+        [show('down'), 'Soft drop'], [show('drop'), 'Hard drop'], [show('hold'), 'Hold'],
+        ['P / Esc', 'Pause'], ['R', 'Retry'], ['M', 'Mute'], ['?', 'Help'],
+      ];
+      keysList.textContent = '';
+      for (const [k, v] of rows) {
+        const dt = document.createElement('dt'); dt.textContent = k;
+        const dd = document.createElement('dd'); dd.textContent = v;
+        keysList.append(dt, dd);
+      }
+    }
+    if (keybindsElem) {
+      keybindsElem.textContent = '';
+      for (const action of Object.keys(ACTION_LABELS)) {
+        const row = document.createElement('div'); row.className = 'bind-row';
+        const name = document.createElement('span'); name.textContent = ACTION_LABELS[action];
+        const keys = document.createElement('kbd'); keys.textContent = rebinding === action ? 'Press a key…' : show(action);
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'secondary small';
+        btn.textContent = rebinding === action ? 'Cancel' : 'Change';
+        btn.addEventListener('click', () => { rebinding = rebinding === action ? null : action; bindError = ''; renderKeys(); });
+        row.append(name, keys, btn);
+        keybindsElem.append(row);
+      }
+      const note = document.createElement('p'); note.className = bindError ? 'error' : 'hint';
+      note.textContent = bindError || 'Choose Change, then press the key you want. It replaces the current keys for that action.';
+      keybindsElem.append(note);
+    }
+  }
+
+  let rebinding = null;
+  let bindError = '';
+  // Capture phase so the key never reaches the dialog or the game.
+  document.addEventListener('keydown', e => {
+    if (!rebinding) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const k = normKey(e.key);
+    if (k === 'Escape') { rebinding = null; bindError = ''; renderKeys(); return; }
+    if (RESERVED_KEYS.includes(k)) { bindError = `${keyLabel(k)} is reserved and cannot be assigned.`; renderKeys(); return; }
+    // A key does one thing: take it away from any other action, unless that
+    // would leave the other action with no key at all.
+    for (const [a, keys] of Object.entries(settings.keys)) {
+      if (a !== rebinding && keys.includes(k) && keys.length === 1) {
+        bindError = `${keyLabel(k)} is the only key for ${ACTION_LABELS[a]}. Change that one first.`;
+        renderKeys();
+        return;
+      }
+    }
+    for (const a of Object.keys(settings.keys)) settings.keys[a] = settings.keys[a].filter(x => x !== k);
+    settings.keys[rebinding] = [k];
+    rebinding = null;
+    bindError = '';
+    save('tetris.settings', settings);
+    buildKeymap();
+  }, true);
 
   function dialogOpen() {
     return !!document.querySelector('dialog[open]');
@@ -1215,7 +1347,7 @@
       requestNewGame(false);
       return;
     }
-    const action = KEYMAP[e.key];
+    const action = actionFor(e);
     if (!action) return;
     if (!running || gameOver) return; // let arrows work the setup controls
     e.preventDefault();
@@ -1224,8 +1356,42 @@
   });
 
   document.addEventListener('keyup', e => {
-    const action = KEYMAP[e.key];
+    const action = actionFor(e);
     if (action) endHold(action);
+  });
+
+  // ---- gamepad ----
+  // Standard mapping: d-pad or left stick moves, up hard-drops, A/X rotate,
+  // B rotates back, the shoulder buttons hold, Start pauses or starts.
+  const PAD_BUTTONS = { 14: 'left', 15: 'right', 13: 'down', 12: 'drop', 0: 'cw', 2: 'cw', 1: 'ccw', 3: 'ccw', 4: 'hold', 5: 'hold' };
+  let padActive = new Set();
+  let padStart = false;
+  let padLoop = false;
+
+  function pollGamepad() {
+    const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : [];
+    if (!pads.length) { padLoop = false; for (const a of padActive) endHold(a); padActive = new Set(); return; }
+    const pad = pads[0];
+    const now = new Set();
+    for (const [i, action] of Object.entries(PAD_BUTTONS)) if (pad.buttons[i] && pad.buttons[i].pressed) now.add(action);
+    if (pad.axes[0] < -0.5) now.add('left');
+    if (pad.axes[0] > 0.5) now.add('right');
+    if (pad.axes[1] > 0.6) now.add('down');
+    if (!dialogOpen()) {
+      for (const a of now) if (!padActive.has(a) && running && !gameOver) startHold(a);
+      for (const a of padActive) if (!now.has(a)) endHold(a);
+      const start = !!(pad.buttons[9] && pad.buttons[9].pressed);
+      if (start && !padStart) {
+        if (!running || gameOver || pendingRestart) startGame(); else togglePause();
+      }
+      padStart = start;
+    }
+    padActive = now;
+    requestAnimationFrame(pollGamepad);
+  }
+  window.addEventListener('gamepadconnected', () => {
+    if (!padLoop) { padLoop = true; requestAnimationFrame(pollGamepad); }
+    flashCombo('Controller connected');
   });
 
   window.addEventListener('blur', () => held.clear());
@@ -1233,7 +1399,13 @@
   // ---- touch controls ----
   document.querySelectorAll('[data-action]').forEach(btn => {
     const action = btn.dataset.action;
-    const down = e => { e.preventDefault(); sound.unlock(); startHold(action); btn.classList.add('active'); };
+    const down = e => {
+      e.preventDefault();
+      sound.unlock();
+      if (settings.haptics && navigator.vibrate) navigator.vibrate(action === 'drop' ? 18 : 8);
+      startHold(action);
+      btn.classList.add('active');
+    };
     const up = e => { e.preventDefault(); endHold(action); btn.classList.remove('active'); };
     btn.addEventListener('pointerdown', down);
     btn.addEventListener('pointerup', up);
@@ -1291,6 +1463,8 @@
     sdr:       ['set-sdr', 'num'],
     next:      ['set-next', 'num'],
     volume:    ['set-volume', 'num'],
+    safeColors: ['set-safe-colors', 'bool'],
+    haptics:   ['set-haptics', 'bool'],
   };
 
   function formatSetting(key, v) {
@@ -1327,12 +1501,17 @@
   if (resetBtn) {
     resetBtn.addEventListener('click', () => {
       Object.assign(settings, DEFAULT_SETTINGS);
+      settings.keys = JSON.parse(JSON.stringify(DEFAULT_KEYS));
+      rebinding = null;
+      bindError = '';
       save('tetris.settings', settings);
       syncSettingsForm();
+      buildKeymap();
       applySettings();
     });
   }
 
+  if (settingsDlg) settingsDlg.addEventListener('close', () => { rebinding = null; bindError = ''; renderKeys(); });
   if (settingsBtn) settingsBtn.onclick = () => openDialog(settingsDlg);
   if (helpBtn) helpBtn.onclick = () => openDialog(helpDlg);
 
@@ -1386,7 +1565,7 @@
 
   // Warn before leaving mid-game; the result is only saved at game end.
   window.addEventListener('beforeunload', e => {
-    if (running && !gameOver && score > 0) {
+    if (running && !gameOver && score > 0 && !MODES[mode].practice) {
       e.preventDefault();
       e.returnValue = '';
     }
@@ -1398,6 +1577,7 @@
   nextQueue = [];
   restoreSetup();
   readSetup();
+  buildKeymap();
   updateHud();
   fitAll();
   if (window.ResizeObserver) new ResizeObserver(fitAll).observe(boardWrap);

@@ -651,3 +651,42 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   .lb-rows li { grid-template-columns: 2em 1fr auto; }
   .lb-rows .meta, .lb-rows .when { display: none; }
 }
+
+/* ---- progress bar under the stats ---- */
+.progress.wide { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; }
+.progress-track { height: 6px; border-radius: 3px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; }
+.progress-track i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+.progress small { color: var(--muted); font-size: 0.72rem; }
+
+/* ---- key bindings in Settings ---- */
+.bind-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 10px; padding: 4px 0; }
+.bind-row kbd { min-width: 4.5em; text-align: center; padding: 3px 8px; }
+#keybinds .hint, #keybinds .error { margin: 8px 0 0; font-size: 0.8rem; }
+#keybinds .error { color: var(--danger); }
+
+/* ---- password show/hide, dismissible flash ---- */
+.pw-wrap { position: relative; display: block; margin-top: 6px; }
+.pw-wrap input { margin-top: 0 !important; padding-right: 64px !important; }
+.pw-toggle {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  padding: 4px 8px; font-size: 0.75rem; background: #3a414b; color: var(--text); width: auto !important;
+}
+.pw-toggle:hover { background: #4a525d; }
+.pw-toggle:active { transform: translateY(-50%); }
+.flash { position: relative; padding-right: 36px; transition: opacity 0.6s; }
+.flash.fade { opacity: 0.55; }
+.flash-close {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  background: none; color: var(--text); padding: 2px 8px; font-size: 1.1rem;
+}
+.flash-close:hover { background: rgba(255,255,255,0.1); }
+
+/* ---- recent games table ---- */
+table.recent { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+table.recent th { text-align: left; color: var(--muted); font-weight: normal; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; padding: 4px 6px; }
+table.recent td { padding: 6px; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) {
+  .progress small { display: none; }
+  table.recent th:nth-child(4), table.recent td:nth-child(4) { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .progress-track i, .flash { transition: none; } }

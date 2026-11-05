@@ -18,6 +18,7 @@ class AccountController extends Controller
             'user' => $user,
             'googleEnabled' => GoogleController::enabled(),
             'games' => $user->scores()->count(),
+            'recent' => $user->scores()->latest()->limit(10)->get(),
         ]);
     }
 

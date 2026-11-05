@@ -62,6 +62,38 @@
     @yield('content')
   </main>
 
+  <script>
+    // Show/hide toggle on every password field.
+    document.querySelectorAll('input[type="password"]').forEach(function (input) {
+      var wrap = document.createElement('span');
+      wrap.className = 'pw-wrap';
+      input.parentNode.insertBefore(wrap, input);
+      wrap.appendChild(input);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pw-toggle';
+      btn.textContent = 'Show';
+      btn.setAttribute('aria-label', 'Show password');
+      btn.addEventListener('click', function () {
+        var hidden = input.type === 'password';
+        input.type = hidden ? 'text' : 'password';
+        btn.textContent = hidden ? 'Hide' : 'Show';
+        btn.setAttribute('aria-label', hidden ? 'Hide password' : 'Show password');
+      });
+      wrap.appendChild(btn);
+    });
+    // Status messages can be dismissed, and fade on their own after a while.
+    document.querySelectorAll('.flash[role="status"]').forEach(function (flash) {
+      var close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'flash-close';
+      close.setAttribute('aria-label', 'Dismiss');
+      close.textContent = '×';
+      close.addEventListener('click', function () { flash.remove(); });
+      flash.appendChild(close);
+      setTimeout(function () { flash.classList.add('fade'); }, 8000);
+    });
+  </script>
   @stack('scripts')
 </body>
 </html>

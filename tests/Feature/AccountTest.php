@@ -79,4 +79,20 @@ class AccountTest extends TestCase
         $this->assertDatabaseCount('users', 0);
         $this->assertDatabaseCount('scores', 0);
     }
+
+    public function test_account_page_lists_recent_games(): void
+    {
+        $user = User::factory()->create();
+        $this->actingAs($user)->get('/account')->assertSee('No saved games yet');
+
+        Score::create(['user_id' => $user->id, 'mode' => 'sprint', 'score' => 4200, 'lines' => 40, 'level' => 1, 'duration_ms' => 75250]);
+        Score::create(['user_id' => $user->id, 'score' => 9000, 'lines' => 31, 'level' => 4]);
+        $other = User::factory()->create();
+        Score::create(['user_id' => $other->id, 'score' => 77777, 'lines' => 1, 'level' => 1]);
+
+        $this->actingAs($user)->get('/account')
+            ->assertOk()
+            ->assertSeeInOrder(['Recent games', 'Sprint', '4,200', '1:15', 'Marathon', '9,000'])
+            ->assertDontSee('77,777');
+    }
 }

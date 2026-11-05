@@ -42,6 +42,10 @@
                     <span>{{ $label }}</span>
                   </label>
                 @endforeach
+                <label class="mode">
+                  <input type="radio" name="mode" value="zen" />
+                  <span>Zen</span>
+                </label>
               </div>
               <p class="mode-help" id="mode-help">Endless. Speed rises every 10 lines.</p>
               <label class="level-pick">
@@ -69,6 +73,10 @@
           <div class="stat"><span>Lines</span><strong id="lines">0</strong></div>
           <div class="stat"><span>Level</span><strong id="level">1</strong></div>
           <div class="stat"><span id="time-label">Time</span><strong id="time">0:00</strong></div>
+          <div class="progress wide" title="Progress">
+            <div class="progress-track"><i id="progress-bar"></i></div>
+            <small id="progress-label">10 lines to level 2</small>
+          </div>
           <div class="stat wide"><span>Best<em> · <b id="best-mode">Marathon</b></em></span><strong id="best">{{ $bests['marathon']?->score ?? 0 }}</strong></div>
         </div>
 
@@ -92,18 +100,7 @@
 
           <div class="panel keys">
             <h2>Keys</h2>
-            <dl>
-              <dt>← →</dt><dd>Move</dd>
-              <dt>↑ / X</dt><dd>Rotate</dd>
-              <dt>Z</dt><dd>Rotate back</dd>
-              <dt>↓</dt><dd>Soft drop</dd>
-              <dt>Space</dt><dd>Hard drop</dd>
-              <dt>C</dt><dd>Hold</dd>
-              <dt>P / Esc</dt><dd>Pause</dd>
-              <dt>R</dt><dd>Retry</dd>
-              <dt>M</dt><dd>Mute</dd>
-              <dt>?</dt><dd>Help</dd>
-            </dl>
+            <dl id="keys-list"></dl>
           </div>
         </div>
       </aside>
@@ -187,11 +184,19 @@
         <label class="toggle"><input type="checkbox" id="set-ghost" /> Ghost piece <small>shows where the piece will land</small></label>
         <label class="toggle"><input type="checkbox" id="set-grid" /> Grid lines</label>
         <label class="toggle"><input type="checkbox" id="set-effects" /> Particles and screen shake</label>
+        <label class="toggle"><input type="checkbox" id="set-safe-colors" /> Colour-blind friendly piece colours</label>
+        <label class="toggle"><input type="checkbox" id="set-haptics" /> Vibrate on touch controls <small>phones that support it</small></label>
         <label class="toggle"><input type="checkbox" id="set-countdown" /> 3-2-1 countdown before each game</label>
         <label class="range">
           <span>Next queue <output id="set-next-out"></output></span>
           <input type="range" id="set-next" min="1" max="6" step="1" />
         </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Controls</legend>
+        <div id="keybinds"></div>
+        <p class="hint">Controllers work too: d-pad or stick to move, up to drop, A or X to rotate, B to rotate back, shoulder buttons to hold, Start to pause.</p>
       </fieldset>
 
       <fieldset>
@@ -241,6 +246,7 @@
         <dt>Marathon</dt><dd>Endless. The speed rises every 10 lines, and from level 19 pieces land the moment they appear. Ranked by score.</dd>
         <dt>Sprint 40</dt><dd>Clear 40 lines as fast as possible. Ranked by time.</dd>
         <dt>Ultra 2:00</dt><dd>Two minutes to score as much as possible. Ranked by score.</dd>
+        <dt>Zen</dt><dd>Relaxed practice. When the board fills up it clears and you carry on. Not ranked or saved.</dd>
       </dl>
 
       <h3>Controls</h3>

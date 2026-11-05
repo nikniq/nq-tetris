@@ -78,6 +78,30 @@
       </section>
     @endif
 
+    <section>
+      <h2>Recent games</h2>
+      @if ($recent->isEmpty())
+        <p class="hint">No saved games yet. <a href="{{ route('tetris') }}">Play one</a> and it will show up here.</p>
+      @else
+        <table class="recent">
+          <thead><tr><th>Mode</th><th>Score</th><th>Lines</th><th>Level</th><th>Time</th><th>When</th></tr></thead>
+          <tbody>
+            @foreach ($recent as $game)
+              <tr>
+                <td>{{ ucfirst($game->mode) }}</td>
+                <td>{{ number_format($game->score) }}</td>
+                <td>{{ $game->lines }}</td>
+                <td>{{ $game->level }}</td>
+                <td>{{ $game->duration_ms === null ? '—' : sprintf('%d:%02d', intdiv($game->duration_ms, 60000), intdiv($game->duration_ms % 60000, 1000)) }}</td>
+                <td title="{{ $game->created_at }}">{{ $game->created_at->diffForHumans() }}</td>
+              </tr>
+            @endforeach
+          </tbody>
+        </table>
+        <p class="hint"><a href="{{ route('leaderboard') }}">See where you rank</a></p>
+      @endif
+    </section>
+
     <section class="danger-zone">
       <h2>Delete account</h2>
       <p class="hint">Removes your account and every score you have saved. This cannot be undone.</p>
