@@ -26,6 +26,7 @@
   <header id="topbar">
     <a href="{{ route('tetris') }}" class="brand">TETRIS</a>
     <nav>
+      <a href="{{ route('versus') }}" @class(['active' => request()->routeIs('versus')])>2 Player</a>
       <a href="{{ route('leaderboard') }}" @class(['active' => request()->routeIs('leaderboard')])>Leaderboard</a>
       @auth
         <a href="{{ route('account') }}" class="who" title="Account">

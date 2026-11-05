@@ -12,6 +12,7 @@ use App\Http\Controllers\ScoreController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [GameController::class, 'index'])->name('tetris');
+Route::view('/versus', 'versus')->name('versus');
 Route::get('/leaderboard/{mode?}', [LeaderboardController::class, 'index'])->name('leaderboard');
 
 Route::middleware('guest')->group(function () {

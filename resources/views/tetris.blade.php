@@ -62,6 +62,7 @@
               <button id="overlay-btn" type="button">Start</button>
               <button id="overlay-alt" type="button" class="secondary" hidden>Resume</button>
             </div>
+            <p class="versus-link"><a href="{{ route('versus') }}">Play two player on this screen</a></p>
             <p class="overlay-hint"><kbd>Enter</kbd> start · <kbd>R</kbd> retry · <kbd>Esc</kbd> pause · <kbd>?</kbd> help</p>
             <p class="touch-hint">Swipe to move · tap to rotate · drag down to soft drop · flick down to drop</p>
           </div>
