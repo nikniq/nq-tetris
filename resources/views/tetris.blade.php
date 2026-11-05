@@ -186,6 +186,7 @@
         <label class="toggle"><input type="checkbox" id="set-effects" /> Particles and screen shake</label>
         <label class="toggle"><input type="checkbox" id="set-safe-colors" /> Colour-blind friendly piece colours</label>
         <label class="toggle"><input type="checkbox" id="set-haptics" /> Vibrate on touch controls <small>phones that support it</small></label>
+        <label class="toggle"><input type="checkbox" id="set-buffer" /> Buffered rotate and hold <small>a key held as a piece appears applies at once</small></label>
         <label class="toggle"><input type="checkbox" id="set-countdown" /> 3-2-1 countdown before each game</label>
         <label class="range">
           <span>Next queue <output id="set-next-out"></output></span>
@@ -220,6 +221,7 @@
 
       <fieldset>
         <legend>Sound</legend>
+        <label class="toggle"><input type="checkbox" id="set-music" /> Music while playing</label>
         <label class="range">
           <span>Volume <output id="set-volume-out"></output></span>
           <input type="range" id="set-volume" min="0" max="100" step="5" />

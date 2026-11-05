@@ -19,7 +19,7 @@ src = src.replace(/\}\)\(\);\s*$/, `window.__t = {
   set lastWasRotate(v){lastWasRotate=v;}, get lockResets(){return lockResets;},
   get settings(){return settings;}, get countdown(){return countdown;}, get pendingRestart(){return pendingRestart;},
   get paused(){return paused;}, get deathStart(){return deathStart;}, get COLORS(){return COLORS;}, get held(){return held;},
-  makePiece, ghostY, enterPlay, applySettings, buildKeymap, TOTAL_ROWS, BUFFER,
+  makePiece, ghostY, enterPlay, applySettings, buildKeymap, TOTAL_ROWS, BUFFER, spawn, get fx(){return fx;}, get holdPiece(){return holdPiece;},
 };\n})();`);
 
 const noop = () => {};
@@ -253,6 +253,26 @@ const live2 = t.piece; pads = [mkPad([12])]; frames(1); pads = [mkPad([])]; fram
 assert(t.piece !== live2, 'd-pad up hard-drops');
 pads = [];
 ok('gamepad');
+
+// 12b. buffered rotate and hold, drop effects
+modeRadio.value = 'marathon'; newGame();
+t.board = emptyBoard();
+t.nextQueue[0] = t.makePiece(6);
+key('ArrowUp'); t.spawn(); key('ArrowUp', 'keyup');
+assert(t.piece.typeId === 6 && t.piece.rot === 1, 'a held rotate key pre-rotates the new piece');
+key('c');                                   // holds the current piece; the key stays down
+t.nextQueue[0] = t.makePiece(2);
+t.spawn(); key('c', 'keyup');
+assert(t.holdPiece && t.holdPiece.typeId === 2 && t.piece.typeId !== undefined, 'a held hold key stashes the new piece at once');
+t.settings.buffer = false; t.nextQueue[0] = t.makePiece(6);
+key('ArrowUp'); t.spawn(); key('ArrowUp', 'keyup');
+assert(t.piece.rot === 0, 'buffering can be turned off');
+t.settings.buffer = true;
+t.board = emptyBoard(); setPiece(1); tap(' ');
+assert(t.fx.some(f => f.kind === 'trail') && t.fx.some(f => f.kind === 'flash'), 'hard drop leaves a trail and a lock flash');
+frames(20);
+assert(t.fx.length === 0, 'effects expire');
+ok('buffered input, drop effects');
 
 // 13. countdown
 t.settings.countdown = true; modeRadio.value = 'marathon'; newGame();

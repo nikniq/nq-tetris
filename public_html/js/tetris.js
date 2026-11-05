@@ -180,6 +180,8 @@
     volume: 60,   // percent
     safeColors: false, // colour-blind friendly palette
     haptics: true,     // vibrate on touch controls where the device supports it
+    music: true,       // background tune while playing
+    buffer: true,      // a rotate or hold key held as a piece appears applies at once
   };
   const DEFAULT_KEYS = {
     left: ['ArrowLeft'], right: ['ArrowRight'], down: ['ArrowDown'],
@@ -245,7 +247,101 @@
     const seq = (notes, gap, dur, type, gain) =>
       notes.forEach((f, i) => setTimeout(() => tone(f, dur, type, gain), i * gap));
 
+    // ---- background music: Korobeiniki, synthesised note by note ----
+    // [semitones from A4, length in beats]; null is a rest.
+    const N = { A4: 0, B4: 2, C5: 3, D5: 5, E5: 7, F5: 8, G5: 10, A5: 12 };
+    const MELODY = [
+      ['E5', 1], ['B4', .5], ['C5', .5], ['D5', 1], ['C5', .5], ['B4', .5],
+      ['A4', 1], ['A4', .5], ['C5', .5], ['E5', 1], ['D5', .5], ['C5', .5],
+      ['B4', 1.5], ['C5', .5], ['D5', 1], ['E5', 1],
+      ['C5', 1], ['A4', 1], ['A4', 2],
+      ['D5', 1.5], ['F5', .5], ['A5', 1], ['G5', .5], ['F5', .5],
+      ['E5', 1.5], ['C5', .5], ['E5', 1], ['D5', .5], ['C5', .5],
+      ['B4', 1], ['B4', .5], ['C5', .5], ['D5', 1], ['E5', 1],
+      ['C5', 1], ['A4', 1], ['A4', 2],
+    ];
+    // One bass root per bar of four beats, in semitones from A4.
+    const BASS = [-29, -24, -29, -24, -31, -33, -29, -24];
+    const TOTAL_BEATS = 32;
+    const freq = semis => 440 * Math.pow(2, semis / 12);
+
+    let musicOn = false;
+    let musicGain = null;
+    let nextNoteTime = 0;   // audio-clock time of the next melody note
+    let noteIdx = 0;
+    let beatPos = 0;        // beats into the loop, for the bass line
+    let nextBassBeat = 0;
+    let musicTimer = null;
+
+    const beatLen = () => 60 / (132 + Math.min(14, Math.max(0, (level || 1) - 1)) * 6);
+
+    function musicNote(f, start, dur, type, gain) {
+      const osc = actx.createOscillator();
+      const g = actx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(f, start);
+      g.gain.setValueAtTime(0.0001, start);
+      g.gain.linearRampToValueAtTime(gain, start + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      osc.connect(g).connect(musicGain);
+      osc.start(start);
+      osc.stop(start + dur + 0.02);
+    }
+
+    // Queue everything due in the next quarter second, then check again
+    // shortly. Scheduling on the audio clock keeps the rhythm steady even
+    // when the page is busy drawing.
+    function musicTick() {
+      if (!musicOn || !actx) return;
+      const audible = settings.music && !muted && settings.volume > 0;
+      musicGain.gain.setTargetAtTime(audible ? 0.5 * (settings.volume / 60) : 0, actx.currentTime, 0.05);
+      const b = beatLen();
+      while (nextNoteTime < actx.currentTime + 0.25) {
+        const [name, beats] = MELODY[noteIdx];
+        if (audible && name) musicNote(freq(N[name]), nextNoteTime, beats * b * 0.92, 'square', 0.035);
+        // Bass: root and its octave on alternate half-beats under this note.
+        while (nextBassBeat < beatPos + beats - 1e-6) {
+          const root = BASS[Math.floor(nextBassBeat / 4) % BASS.length];
+          const up = Math.round(nextBassBeat * 2) % 2 === 1 ? 12 : 0;
+          if (audible) musicNote(freq(root + up), nextNoteTime + (nextBassBeat - beatPos) * b, b * 0.45, 'triangle', 0.05);
+          nextBassBeat += 0.5;
+        }
+        nextNoteTime += beats * b;
+        beatPos += beats;
+        noteIdx++;
+        if (noteIdx >= MELODY.length) { noteIdx = 0; beatPos = 0; nextBassBeat = 0; }
+      }
+      musicTimer = setTimeout(musicTick, 80);
+    }
+
+    function musicStart(fromTop) {
+      if (musicOn) return;
+      const a = ensure();
+      if (!a) return;
+      musicGain = a.createGain();
+      musicGain.gain.value = 0;
+      musicGain.connect(a.destination);
+      if (fromTop) { noteIdx = 0; beatPos = 0; nextBassBeat = 0; }
+      else { nextBassBeat = Math.ceil(beatPos * 2) / 2; }
+      nextNoteTime = a.currentTime + 0.08;
+      musicOn = true;
+      musicTick();
+    }
+
+    function musicStop() {
+      if (!musicOn) return;
+      musicOn = false;
+      clearTimeout(musicTimer);
+      // Fade the already-queued notes rather than cutting them with a click.
+      const g = musicGain;
+      try {
+        g.gain.setTargetAtTime(0, actx.currentTime, 0.03);
+        setTimeout(() => { try { g.disconnect(); } catch (_) {} }, 400);
+      } catch (_) {}
+    }
+
     return {
+      musicStart, musicStop,
       move:   () => tone(220, 0.04, 'square', 0.03),
       rotate: () => tone(330, 0.05, 'triangle', 0.04),
       lock:   () => tone(140, 0.08, 'square', 0.05, -60),
@@ -665,6 +761,7 @@
       const alpha = grounded() ? 1 - 0.35 * (lockTimer / LOCK_DELAY) : 1;
       drawMatrix(ctx, piece.shape, { x: piece.x, y: piece.y }, BLOCK_SIZE, alpha);
     }
+    drawFx();
     drawParticles();
     ctx.restore();
 
@@ -770,6 +867,14 @@
     nextQueue.push(makePiece(nextTypeId()));
     holdUsed = false;
     enterPlay();
+    // Initial hold / initial rotation: a hold or rotate key that is still
+    // down when the piece appears is applied before the piece can fall.
+    // At high speed this is the only way to act on a piece in time.
+    if (settings.buffer && running && !gameOver && piece) {
+      if (held.has('hold')) hold();
+      else if (held.has('cw')) rotatePiece(1);
+      else if (held.has('ccw')) rotatePiece(-1);
+    }
   }
 
   // Put the current piece at the top. It appears in the hidden rows and
@@ -795,6 +900,7 @@
 
   function lockPiece() {
     const tspin = tSpinType();
+    addFx('flash', pieceCells(piece));
     merge(board, piece);
     pieces++;
     // Lock out: a piece that settles entirely in the hidden rows ends the game.
@@ -897,8 +1003,54 @@
     return true;
   }
 
+  // Short-lived overlays drawn on the board: a streak behind a hard drop
+  // and a white flash on the cells of a piece as it locks.
+  let fx = [];
+  function addFx(kind, cells, extra = {}) {
+    if (!settings.effects) return;
+    fx.push({ kind, cells, age: 0, life: kind === 'trail' ? 180 : 130, ...extra });
+  }
+  function pieceCells(p) {
+    const cells = [];
+    p.shape.forEach((row, y) => row.forEach((v, x) => { if (v) cells.push([p.x + x, p.y + y]); }));
+    return cells;
+  }
+  function updateFx(delta) {
+    if (!fx.length) return;
+    for (const f of fx) f.age += delta;
+    fx = fx.filter(f => f.age < f.life);
+  }
+  function drawFx() {
+    for (const f of fx) {
+      const k = 1 - f.age / f.life;
+      if (f.kind === 'flash') {
+        ctx.fillStyle = `rgba(255,255,255,${0.55 * k})`;
+        for (const [x, y] of f.cells) ctx.fillRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+      } else {
+        // One streak per column, from where the drop began to the top of the piece.
+        for (const [x, top] of f.cells) {
+          const y0 = f.from * BLOCK_SIZE, y1 = top * BLOCK_SIZE;
+          if (y1 <= y0) continue;
+          const g = ctx.createLinearGradient(0, y0, 0, y1);
+          g.addColorStop(0, 'rgba(255,255,255,0)');
+          g.addColorStop(1, `rgba(255,255,255,${0.28 * k})`);
+          ctx.fillStyle = g;
+          ctx.fillRect(x * BLOCK_SIZE + 3, y0, BLOCK_SIZE - 6, y1 - y0);
+        }
+      }
+    }
+  }
+
   function hardDrop() {
     const target = ghostY();
+    if (target - piece.y > 1) {
+      // Topmost cell of the landed piece in each column it occupies.
+      const tops = new Map();
+      piece.shape.forEach((row, y) => row.forEach((v, x) => {
+        if (v && !tops.has(piece.x + x)) tops.set(piece.x + x, target + y);
+      }));
+      addFx('trail', [...tops], { from: piece.y });
+    }
     if (target > piece.y) lastWasRotate = false;
     score += (target - piece.y) * 2;
     piece.y = target;
@@ -936,6 +1088,7 @@
         countdown = 0;
         if (countdownElem) countdownElem.hidden = true;
         sound.go();
+        sound.musicStart(true);
       } else if (n !== lastCount) {
         lastCount = n;
         if (countdownElem) countdownElem.textContent = n;
@@ -981,6 +1134,7 @@
     }
 
     updateParticles(delta);
+    updateFx(delta);
     if (running) {
       timeElem.textContent = fmtTime(limit ? limit - elapsed : elapsed);
       if (limit) updateProgress();
@@ -1051,7 +1205,8 @@
       countdownElem.hidden = countdown === 0;
       countdownElem.textContent = '3';
     }
-    if (countdown) sound.tick();
+    sound.musicStop();
+    if (countdown) sound.tick(); else sound.musicStart(true);
 
     lastTime = performance.now();
     requestAnimationFrame(update);
@@ -1063,10 +1218,12 @@
     pauseBtn.textContent = paused ? 'Resume' : 'Pause';
     if (paused) {
       held.clear();
+      sound.musicStop();
       showOverlay('PAUSED', 'Press P, Esc or Resume to continue', 'Resume');
     } else {
       pendingRestart = false;
       hideOverlay();
+      if (countdown <= 0) sound.musicStart(false);
       lastTime = performance.now();
       requestAnimationFrame(update);
     }
@@ -1105,6 +1262,7 @@
     held.clear();
     if (countdownElem) countdownElem.hidden = true;
     draw();
+    sound.musicStop();
     if (won) sound.win(); else sound.over();
     const isBest = recordBest();
     updateHud();
@@ -1465,6 +1623,8 @@
     volume:    ['set-volume', 'num'],
     safeColors: ['set-safe-colors', 'bool'],
     haptics:   ['set-haptics', 'bool'],
+    music:     ['set-music', 'bool'],
+    buffer:    ['set-buffer', 'bool'],
   };
 
   function formatSetting(key, v) {
