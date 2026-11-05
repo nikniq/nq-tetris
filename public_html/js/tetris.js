@@ -185,11 +185,11 @@
   };
   const DEFAULT_KEYS = {
     left: ['ArrowLeft'], right: ['ArrowRight'], down: ['ArrowDown'],
-    cw: ['ArrowUp', 'x'], ccw: ['z'], drop: [' '], hold: ['c', 'Shift'],
+    cw: ['ArrowUp', 'x'], ccw: ['z'], flip: ['a'], drop: [' '], hold: ['c', 'Shift'],
   };
   const ACTION_LABELS = {
     left: 'Move left', right: 'Move right', down: 'Soft drop',
-    cw: 'Rotate', ccw: 'Rotate back', drop: 'Hard drop', hold: 'Hold',
+    cw: 'Rotate', ccw: 'Rotate back', flip: 'Rotate 180°', drop: 'Hard drop', hold: 'Hold',
   };
   // Keys with a fixed job; they cannot be assigned to a game action.
   const RESERVED_KEYS = ['Enter', 'Escape', 'Tab', 'p', 'm', 'r', '?'];
@@ -203,7 +203,14 @@
     const keys = {};
     for (const a of Object.keys(DEFAULT_KEYS)) {
       const v = saved && saved[a];
-      keys[a] = Array.isArray(v) && v.length && v.every(k => typeof k === 'string') ? v.map(normKey) : DEFAULT_KEYS[a].slice();
+      keys[a] = Array.isArray(v) && v.every(k => typeof k === 'string') && (v.length || a === 'flip') ? v.map(normKey) : null;
+    }
+    // Actions with nothing saved take their default keys, minus any key the
+    // player already gave to something else (an action added in an update
+    // must not steal a key from an existing binding).
+    const taken = new Set(Object.values(keys).filter(Boolean).flat());
+    for (const a of Object.keys(DEFAULT_KEYS)) {
+      if (keys[a] === null) keys[a] = DEFAULT_KEYS[a].filter(k => !taken.has(k));
     }
     return keys;
   })(settings.keys);
@@ -529,6 +536,16 @@
     piece.shape = original;
     piece.x = ox;
     piece.y = oy;
+    return false;
+  }
+
+  // Half turn: two quarter turns as one move. If the second cannot
+  // complete, the piece goes back exactly as it was.
+  function rotate180() {
+    if (piece.typeId === 4) return false;
+    const saved = { shape: piece.shape, x: piece.x, y: piece.y, rot: piece.rot };
+    if (rotatePiece(1) && rotatePiece(1)) return true;
+    Object.assign(piece, saved);
     return false;
   }
 
@@ -1351,6 +1368,7 @@
         break;
       case 'cw':    rotatePiece(1); break;
       case 'ccw':   rotatePiece(-1); break;
+      case 'flip':  rotate180(); break;
       case 'drop':  hardDrop(); break;
       case 'hold':  hold(); break;
       default: return;
@@ -1408,10 +1426,10 @@
   // The Keys panel and the Settings rows are drawn from the live bindings,
   // so they never disagree with what the keys actually do.
   function renderKeys() {
-    const show = a => settings.keys[a].map(keyLabel).join(' / ');
+    const show = a => settings.keys[a].map(keyLabel).join(' / ') || '—';
     if (keysList) {
       const rows = [
-        [`${show('left')} ${show('right')}`, 'Move'], [show('cw'), 'Rotate'], [show('ccw'), 'Rotate back'],
+        [`${show('left')} ${show('right')}`, 'Move'], [show('cw'), 'Rotate'], [show('ccw'), 'Rotate back'], [show('flip'), 'Rotate 180°'],
         [show('down'), 'Soft drop'], [show('drop'), 'Hard drop'], [show('hold'), 'Hold'],
         ['P / Esc', 'Pause'], ['R', 'Retry'], ['M', 'Mute'], ['?', 'Help'],
       ];
@@ -1577,16 +1595,28 @@
   let touchStart = null;
   canvas.addEventListener('touchstart', e => {
     if (e.touches.length !== 1) return;
-    touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now(), moved: 0 };
+    touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now(), moved: 0, dropped: 0, axis: null };
   }, { passive: true });
   canvas.addEventListener('touchmove', e => {
     if (!touchStart || !running || paused) return;
     const cell = (canvas.clientWidth || W) / COLS;
     const dx = e.touches[0].clientX - touchStart.x;
-    const cells = Math.trunc(dx / cell);
-    if (cells !== touchStart.moved) {
-      const step = cells > touchStart.moved ? 1 : -1;
-      while (touchStart.moved !== cells) { press(step > 0 ? 'right' : 'left'); touchStart.moved += step; }
+    const dy = e.touches[0].clientY - touchStart.y;
+    // The first clear direction decides what this touch is: a sideways
+    // drag moves the piece, a downward drag soft-drops it. Locking the
+    // axis stops a slightly diagonal drag from doing both.
+    if (!touchStart.axis && Math.max(Math.abs(dx), Math.abs(dy)) > cell * 0.6) {
+      touchStart.axis = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
+    }
+    if (touchStart.axis === 'x') {
+      const cells = Math.trunc(dx / cell);
+      if (cells !== touchStart.moved) {
+        const step = cells > touchStart.moved ? 1 : -1;
+        while (touchStart.moved !== cells) { press(step > 0 ? 'right' : 'left'); touchStart.moved += step; }
+      }
+    } else if (touchStart.axis === 'y' && dy > 0) {
+      const rows = Math.trunc(dy / cell);
+      while (touchStart.dropped < rows) { press('down'); touchStart.dropped++; }
     }
   }, { passive: true });
   canvas.addEventListener('touchend', e => {
@@ -1596,7 +1626,7 @@
     const dy = t.clientY - touchStart.y;
     const quick = Date.now() - touchStart.t < 300;
     if (running && !gameOver) {
-      if (dy > 60 && Math.abs(dx) < 40 && quick) press('drop');
+      if (dy > 60 && Math.abs(dx) < 40 && quick && touchStart.axis !== 'x') press('drop');
       else if (Math.abs(dx) < 12 && Math.abs(dy) < 12) press('cw');
     }
     touchStart = null;
@@ -1709,6 +1739,10 @@
 
   startBtn.onclick = () => requestNewGame(true);
   pauseBtn.onclick = togglePause;
+  const touchPause = $('touch-pause');
+  if (touchPause) touchPause.addEventListener('click', () => {
+    if (!running || gameOver) startGame(); else togglePause();
+  });
   muteBtn.onclick = () => setMuteLabel(sound.toggle());
   overlayBtn.onclick = () => {
     if (paused && running && !pendingRestart) togglePause();

@@ -208,9 +208,9 @@ assert(posted.length === before, 'zen posts nothing');
 ok('zen mode');
 
 // 9. key remapping
-t.settings.keys.left = ['a']; t.buildKeymap();
+t.settings.keys.left = ['q']; t.buildKeymap();
 t.board = emptyBoard(); setPiece(4);
-const kx = t.piece.x; tap('A');
+const kx = t.piece.x; tap('Q');
 assert(t.piece.x === kx - 1, 'remapped key works, case-insensitively');
 tap('ArrowLeft');
 assert(t.piece.x === kx - 1, 'the old key is unbound');
@@ -273,6 +273,18 @@ assert(t.fx.some(f => f.kind === 'trail') && t.fx.some(f => f.kind === 'flash'),
 frames(20);
 assert(t.fx.length === 0, 'effects expire');
 ok('buffered input, drop effects');
+
+// 12c. 180 degree rotation
+t.board = emptyBoard(); setPiece(6);
+tap('a');
+assert(t.piece.rot === 2, 'A turns the piece half way round');
+t.board = emptyBoard(); setPiece(1); tap('ArrowUp');           // vertical I
+for (let i = 0; i < 10; i++) tap('ArrowLeft');
+t.board.forEach(row => { for (let x = 2; x < 10; x++) row[x] = 3; });  // walled in: no room to turn
+const snap = JSON.stringify([t.piece.shape, t.piece.x, t.piece.y, t.piece.rot]);
+tap('a');
+assert(JSON.stringify([t.piece.shape, t.piece.x, t.piece.y, t.piece.rot]) === snap, 'a blocked half turn leaves the piece untouched');
+ok('180 rotation');
 
 // 13. countdown
 t.settings.countdown = true; modeRadio.value = 'marathon'; newGame();

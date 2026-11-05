@@ -690,3 +690,36 @@ table.recent td { padding: 6px; border-top: 1px solid var(--line); font-variant-
   table.recent th:nth-child(4), table.recent td:nth-child(4) { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .progress-track i, .flash { transition: none; } }
+
+/* ---- touch devices: controls pinned to the bottom, board sized to fit above ---- */
+.touch-hint { display: none; }
+@media (pointer: coarse) {
+  :root { --pad-h: 148px; }
+  body { padding-bottom: calc(var(--pad-h) + env(safe-area-inset-bottom, 0px)); }
+  #touch {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 6;
+    max-width: none;
+    margin: 0;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+    background: rgba(21, 23, 26, 0.95);
+    border-top: 1px solid var(--line);
+    backdrop-filter: blur(6px);
+  }
+  #touch .row { width: 100%; max-width: 520px; margin: 0 auto; }
+  #touch button { padding: 0; height: 58px; }
+  #touch button.narrow { flex: 0 0 58px; font-size: 1.1rem; }
+  .touch-hint { display: block; margin-top: 10px !important; font-size: 0.72rem !important; }
+}
+@media (pointer: coarse) and (max-width: 720px) {
+  :root {
+    --board-w: clamp(150px, min(calc(100vw - 112px), calc((100vh - 50px - 78px - var(--pad-h) - 48px) / 2)), 320px);
+    --board-w: clamp(150px, min(calc(100vw - 112px), calc((100dvh - 50px - 78px - var(--pad-h) - 48px) / 2)), 320px);
+  }
+  #topbar { padding: 8px 12px; }
+  #topbar nav { gap: 10px; font-size: 0.9rem; }
+  main { padding-top: 8px; }
+  /* Five stats on one row; the progress bar sits under them. */
+  .stats .progress { order: 10; }
+}

@@ -63,6 +63,7 @@
               <button id="overlay-alt" type="button" class="secondary" hidden>Resume</button>
             </div>
             <p class="overlay-hint"><kbd>Enter</kbd> start · <kbd>R</kbd> retry · <kbd>Esc</kbd> pause · <kbd>?</kbd> help</p>
+            <p class="touch-hint">Swipe to move · tap to rotate · drag down to soft drop · flick down to drop</p>
           </div>
         </div>
       </div>
@@ -117,6 +118,7 @@
         <button type="button" data-action="left" aria-label="Move left">◀</button>
         <button type="button" data-action="down" aria-label="Soft drop">▼</button>
         <button type="button" data-action="right" aria-label="Move right">▶</button>
+        <button type="button" id="touch-pause" class="narrow" aria-label="Pause or start">⏯</button>
       </div>
     </div>
 
@@ -256,13 +258,14 @@
         <dt>← →</dt><dd>Move. Hold to slide.</dd>
         <dt>↑ or X</dt><dd>Rotate clockwise</dd>
         <dt>Z</dt><dd>Rotate counter-clockwise</dd>
+        <dt>A</dt><dd>Rotate 180°</dd>
         <dt>↓</dt><dd>Soft drop, 1 point per row</dd>
         <dt>Space</dt><dd>Hard drop, 2 points per row</dd>
         <dt>C or Shift</dt><dd>Hold the piece for later, once per piece</dd>
         <dt>P or Esc</dt><dd>Pause</dd>
         <dt>R</dt><dd>Retry. Instant in Sprint and Ultra, asks first in Marathon.</dd>
         <dt>M</dt><dd>Mute</dd>
-        <dt>Touch</dt><dd>Tap the board to rotate, swipe to move, flick down to drop</dd>
+        <dt>Touch</dt><dd>Tap the board to rotate, swipe to move, drag down to soft drop, flick down to hard drop. The buttons stay at the bottom of the screen.</dd>
       </dl>
 
       <h3>Scoring</h3>
