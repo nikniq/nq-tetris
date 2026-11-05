@@ -69,6 +69,21 @@
       </div>
     </section>
 
+    <div id="touch" aria-label="Touch controls">
+      <div class="row">
+        <button type="button" data-action="hold" aria-label="Hold">Hold</button>
+        <button type="button" data-action="ccw" aria-label="Rotate left">↺</button>
+        <button type="button" data-action="cw" aria-label="Rotate right">↻</button>
+        <button type="button" data-action="drop" aria-label="Hard drop">Drop</button>
+      </div>
+      <div class="row">
+        <button type="button" data-action="left" aria-label="Move left">◀</button>
+        <button type="button" data-action="down" aria-label="Soft drop">▼</button>
+        <button type="button" data-action="right" aria-label="Move right">▶</button>
+        <button type="button" id="touch-pause" class="narrow" aria-label="Pause or start">⏯</button>
+      </div>
+    </div>
+
     <div class="card vs-rules">
       <div class="card-head"><h2>How versus works</h2></div>
       <ul>
@@ -79,7 +94,7 @@
       </ul>
       <p class="hint">No second player? Pick a CPU level on the start screen and play the computer. Against the computer you can use either set of keys.</p>
       <p class="hint" id="vs-pads">Two controllers work too: the first is Player 1, the second is Player 2. Some keyboards cannot register many keys at once; if moves get dropped, use a controller for one player.</p>
-      <p class="hint vs-small-note">This mode needs a keyboard or controllers, and works best on a wide screen.</p>
+      <p class="hint vs-small-note">On a phone, pick a CPU level and play with the buttons at the bottom of the screen. Two people need a keyboard or controllers, and a wide screen.</p>
     </div>
   </div>
 @endsection

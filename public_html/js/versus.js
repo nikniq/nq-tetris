@@ -518,6 +518,9 @@
   // Player 2 can be a person or the computer.
   const OPPONENTS = ['human', 'easy', 'normal', 'hard'];
   let opponent = 'human';
+  // A touch screen has one set of buttons, so it starts against the computer.
+  const touchScreen = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  if (touchScreen) opponent = 'normal';
   try { const saved = localStorage.getItem('tetris.versus.opponent'); if (OPPONENTS.includes(saved)) opponent = saved; } catch (_) {}
   const cpu = () => opponent !== 'human';
   const nameOf = i => (i === 1 && cpu() ? 'Computer' : cpu() ? 'You' : 'Player ' + (i + 1));
@@ -737,6 +740,24 @@
     if (hit) hit[0].held.delete(hit[1]);
   });
   window.addEventListener('blur', () => { for (const p of players) p.held.clear(); if (state === 'playing') togglePause(); });
+
+  // On-screen buttons always play the left board.
+  const pad = $('touch');
+  if (pad) {
+    const release = btn => { btn.classList.remove('active'); players[0].held.delete(btn.dataset.action); };
+    for (const btn of pad.querySelectorAll('button[data-action]')) {
+      btn.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        btn.classList.add('active');
+        if (state === 'playing') press(players[0], btn.dataset.action);
+      });
+      for (const type of ['pointerup', 'pointercancel', 'pointerleave']) btn.addEventListener(type, () => release(btn));
+      btn.addEventListener('contextmenu', e => e.preventDefault());
+    }
+    $('touch-pause').addEventListener('click', () => {
+      if (state === 'playing' || state === 'countdown' || state === 'paused') togglePause(); else proceed();
+    });
+  }
 
   // Gamepads: the first controller is Player 1, the second Player 2.
   const PAD = { 14: 'left', 15: 'right', 13: 'down', 12: 'drop', 0: 'cw', 2: 'cw', 1: 'ccw', 3: 'ccw', 4: 'hold', 5: 'hold' };
