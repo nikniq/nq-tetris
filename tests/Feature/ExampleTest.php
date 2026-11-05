@@ -23,6 +23,7 @@ class ExampleTest extends TestCase
     {
         $this->get('/versus')->assertOk()
             ->assertSee('Player 1')->assertSee('Player 2')
+            ->assertSee('CPU Normal')
             ->assertSee('js/versus.js', false);
 
         $this->get('/')->assertSee('Play two player on this screen');

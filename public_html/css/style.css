@@ -802,3 +802,7 @@ table.recent td { padding: 6px; border-top: 1px solid var(--line); font-variant-
 }
 @media (prefers-reduced-motion: reduce) { .vs-player.shake .vs-board-wrap { animation: none; } .vs-meter i, .vs-banner { transition: none; } }
 .versus-link { margin: 10px 0 0 !important; font-size: 0.82rem !important; }
+
+/* Versus against the computer: its board has no keys to show. */
+.vs-cpu #p2 .vs-keys { visibility: hidden; }
+#vs-options[hidden] { display: none; }

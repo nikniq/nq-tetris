@@ -292,7 +292,155 @@
     }
   }
 
-  const api = { Core, COLS, ROWS, BUFFER, TOTAL, GARBAGE, SHAPES, gravityFor, makePiece, emptyBoard };
+  // ----------------------------------------------------------- computer --
+  // A computer player. It only ever does what a person could: rotate, step
+  // sideways, hard drop, one action at a time, at a pace set by its level.
+
+  const NOOP = { nextType: () => 1, onAttack() {}, onTopOut() {}, onEvent() {}, random: () => 0 };
+  const BOT_LEVELS = {
+    easy:   { think: 450, step: 230, lookahead: false, blunder: 0.1,  stack: false },
+    normal: { think: 250, step: 130, lookahead: true,  blunder: 0.03, stack: true },
+    hard:   { think: 80,  step: 55,  lookahead: true,  blunder: 0,    stack: true },
+  };
+
+  // Every resting place a piece can reach by rotating at the top, sliding
+  // sideways and dropping straight down. Uses the real movement rules, so
+  // whatever it returns can be played with the same sequence of actions.
+  function placements(board, typeId) {
+    const sim = new Core(NOOP);
+    sim.board = board;
+    const out = [], seen = new Set();
+    for (let r = 0; r < 4; r++) {
+      sim.alive = true;
+      sim.piece = makePiece(typeId);
+      sim.enter();
+      if (!sim.alive) return out;
+      let ok = true;
+      if (r === 3) ok = sim.rotate(-1);
+      else for (let k = 0; k < r; k++) ok = sim.rotate(1) && ok;
+      if (!ok) continue;
+      while (sim.move(-1));
+      do {
+        const p = sim.piece, y = sim.ghostY(), cells = [];
+        p.shape.forEach((row, dy) => row.forEach((v, dx) => { if (v) cells.push([p.x + dx, y + dy]); }));
+        const key = cells.join(';');
+        if (!seen.has(key)) { seen.add(key); out.push({ rot: r, x: p.x, cells, typeId }); }
+      } while (sim.move(1));
+    }
+    return out;
+  }
+
+  // Put a placement on a copy of the board and clear any full rows.
+  function settle(board, place) {
+    const next = board.slice();
+    const touched = new Set();
+    let above = true;
+    for (const [x, y] of place.cells) {
+      if (y < 0) continue;
+      if (!touched.has(y)) { next[y] = next[y].slice(); touched.add(y); }
+      next[y][x] = place.typeId;
+      if (y >= BUFFER) above = false;
+    }
+    let lines = 0;
+    for (let y = 0; y < TOTAL; y++) {
+      if (next[y].every(v => v)) { next.splice(y, 1); next.unshift(new Array(COLS).fill(0)); lines++; }
+    }
+    return { board: next, lines, dead: above };
+  }
+
+  const heightOf = board => { let y = 0; while (y < TOTAL && board[y].every(v => !v)) y++; return TOTAL - y; };
+
+  // Higher is better: low, flat, no holes. When stacking for Tetrises the
+  // right-hand column is kept empty as a well for the I piece.
+  function rate(board, stacking) {
+    let total = 0, holes = 0, bumps = 0, max = 0, prev = -1, well = 0;
+    for (let x = 0; x < COLS; x++) {
+      let y = 0;
+      while (y < TOTAL && !board[y][x]) y++;
+      const h = TOTAL - y;
+      for (y++; y < TOTAL; y++) if (!board[y][x]) holes++;
+      if (stacking && x === COLS - 1) { well = h; continue; }
+      total += h;
+      if (h > max) max = h;
+      if (prev >= 0) bumps += Math.abs(h - prev);
+      prev = h;
+    }
+    return -0.51 * total - 0.9 * holes - 0.18 * bumps - 2.5 * well - (max > 13 ? (max - 13) * 1.5 : 0);
+  }
+
+  const LINE_VALUE = [0, 0.4, 1.4, 2.6, 5];
+  // While stacking, small clears waste the well; only a Tetris pays.
+  const STACK_VALUE = [0, -6, -5, -3, 14];
+  const STACK_LIMIT = 10;   // above this height, stop stacking and dig out
+
+  class Bot {
+    constructor(core, level = 'normal', random = Math.random) {
+      this.core = core;
+      this.random = random;
+      this.setLevel(level);
+      this.reset();
+    }
+
+    setLevel(level) { this.level = BOT_LEVELS[level] ? level : 'normal'; this.cfg = BOT_LEVELS[this.level]; }
+
+    reset() { this.planFor = null; this.plan = null; this.timer = 0; }
+
+    // Pick where the current piece should go.
+    think() {
+      const c = this.core;
+      const options = placements(c.board, c.piece.typeId);
+      if (!options.length) return null;
+      if (this.random() < this.cfg.blunder) return options[Math.floor(this.random() * options.length)];
+      const nextType = c.opts.nextType(c.idx);
+      const stacking = this.cfg.stack && heightOf(c.board) <= STACK_LIMIT && c.pendingTotal() < 4;
+      const value = stacking ? STACK_VALUE : LINE_VALUE;
+      let best = null, bestScore = -Infinity;
+      for (const o of options) {
+        const a = settle(c.board, o);
+        let score;
+        if (a.dead) score = -1e6;
+        else if (!this.cfg.lookahead) score = rate(a.board, stacking) + value[a.lines];
+        else {
+          // Judge each spot by the best follow-up with the next piece.
+          score = -1e5;
+          for (const o2 of placements(a.board, nextType)) {
+            const b = settle(a.board, o2);
+            if (b.dead) continue;
+            const s = rate(b.board, stacking) + value[b.lines];
+            if (s > score) score = s;
+          }
+          score += value[a.lines];
+        }
+        if (score > bestScore) { bestScore = score; best = o; }
+      }
+      return best;
+    }
+
+    // One action towards the plan.
+    act() {
+      const c = this.core, p = c.piece, t = this.plan;
+      if (!t) { c.hardDrop(); return; }
+      if (p.rot !== t.rot) {
+        if (!c.rotate((t.rot - p.rot + 4) % 4 === 3 ? -1 : 1)) c.hardDrop();
+      } else if (p.x !== t.x) {
+        if (!c.move(t.x > p.x ? 1 : -1)) c.hardDrop();
+      } else c.hardDrop();
+    }
+
+    update(delta) {
+      const c = this.core;
+      if (!c.alive || !c.piece) return;
+      const id = c.pieces + ':' + c.piece.typeId;
+      if (this.planFor !== id) { this.planFor = id; this.plan = this.think(); this.timer = -this.cfg.think; }
+      this.timer += delta;
+      while (this.timer >= this.cfg.step && c.alive && this.planFor === c.pieces + ':' + c.piece.typeId) {
+        this.timer -= this.cfg.step;
+        this.act();
+      }
+    }
+  }
+
+  const api = { Core, Bot, placements, COLS, ROWS, BUFFER, TOTAL, GARBAGE, SHAPES, gravityFor, makePiece, emptyBoard };
   if (typeof window !== 'undefined') window.Versus = api;
   if (typeof document === 'undefined' || !document.getElementById('versus')) return;
 
@@ -349,6 +497,16 @@
     { ArrowLeft: 'left', ArrowRight: 'right', ArrowDown: 'down', ArrowUp: 'cw', Slash: 'ccw', ShiftRight: 'hold', Enter: 'drop' },
   ];
 
+  // Against the computer, either set of keys plays the one human board.
+  function keyTarget(code) {
+    if (cpu()) {
+      const action = KEYS[0][code] || KEYS[1][code];
+      return action ? [players[0], action] : null;
+    }
+    for (const p of players) if (KEYS[p.i][code]) return [p, KEYS[p.i][code]];
+    return null;
+  }
+
   function fitCanvas(cv, w, h) {
     const ratio = window.devicePixelRatio || 1;
     cv.width = Math.round(w * ratio); cv.height = Math.round(h * ratio);
@@ -356,6 +514,13 @@
     c.setTransform(ratio, 0, 0, ratio, 0, 0);
     return c;
   }
+
+  // Player 2 can be a person or the computer.
+  const OPPONENTS = ['human', 'easy', 'normal', 'hard'];
+  let opponent = 'human';
+  try { const saved = localStorage.getItem('tetris.versus.opponent'); if (OPPONENTS.includes(saved)) opponent = saved; } catch (_) {}
+  const cpu = () => opponent !== 'human';
+  const nameOf = i => (i === 1 && cpu() ? 'Computer' : cpu() ? 'You' : 'Player ' + (i + 1));
 
   const players = [0, 1].map(i => {
     const root = $('p' + (i + 1));
@@ -395,6 +560,26 @@
     });
     return p;
   });
+  const bot = new Bot(players[1].core, 'normal');
+  const optionsEl = $('vs-options');
+  const p2Title = players[1].root.querySelector('h2');
+  const p1Title = players[0].root.querySelector('h2');
+
+  function applyOpponent() {
+    if (cpu()) bot.setLevel(opponent);
+    p1Title.textContent = cpu() ? 'You' : 'Player 1';
+    p2Title.textContent = cpu() ? 'Computer · ' + opponent[0].toUpperCase() + opponent.slice(1) : 'Player 2';
+    $('versus').classList.toggle('vs-cpu', cpu());
+  }
+  for (const input of optionsEl.querySelectorAll('input[name=opponent]')) {
+    input.checked = input.value === opponent;
+    input.addEventListener('change', () => {
+      opponent = input.value;
+      try { localStorage.setItem('tetris.versus.opponent', opponent); } catch (_) {}
+      applyOpponent();
+      input.blur();   // keep Space and Enter away from the radio buttons
+    });
+  }
 
   function showBanner(p, text) {
     p.banner.textContent = text;
@@ -421,6 +606,8 @@
     overlayTitle.textContent = title;
     overlayText.textContent = text;
     startBtn.textContent = button;
+    // The opponent can only be changed between matches.
+    optionsEl.hidden = !(state === 'idle' || state === 'matchover');
     overlay.classList.remove('hidden');
     // The button is deliberately not focused: Space and Enter are the two
     // hard-drop keys, and a player still hammering one when a round ends
@@ -432,6 +619,7 @@
     elapsed = 0;
     for (const p of players) {
       p.core.reset();
+      bot.reset();
       p.held.clear();
       p.flash = 0; p.shake = 0;
       p.root.classList.remove('lost', 'won');
@@ -467,10 +655,10 @@
     draw();
     if (w.wins >= WIN_TARGET) {
       state = 'matchover';
-      showOverlay(`PLAYER ${winner + 1} WINS`, `Match ${players[0].wins} – ${players[1].wins}`, 'New match');
+      showOverlay(cpu() ? (winner === 0 ? 'YOU WIN' : 'COMPUTER WINS') : `PLAYER ${winner + 1} WINS`, `Match ${players[0].wins} – ${players[1].wins}`, 'New match');
     } else {
       state = 'roundover';
-      showOverlay(`Round to Player ${winner + 1}`, `${players[0].wins} – ${players[1].wins} · first to ${WIN_TARGET}`, 'Next round');
+      showOverlay(cpu() ? (winner === 0 ? 'You take the round' : 'Round to the computer') : `Round to Player ${winner + 1}`, `${players[0].wins} – ${players[1].wins} · first to ${WIN_TARGET}`, 'Next round');
     }
   }
 
@@ -541,13 +729,12 @@
       if (e.code === 'Enter' && !e.repeat) proceed();
       return;
     }
-    for (const p of players) {
-      const action = KEYS[p.i][e.code];
-      if (action) { e.preventDefault(); if (!e.repeat) press(p, action); return; }
-    }
+    const hit = keyTarget(e.code);
+    if (hit) { e.preventDefault(); if (!e.repeat) press(hit[0], hit[1]); }
   });
   document.addEventListener('keyup', e => {
-    for (const p of players) { const action = KEYS[p.i][e.code]; if (action) p.held.delete(action); }
+    const hit = keyTarget(e.code);
+    if (hit) hit[0].held.delete(hit[1]);
   });
   window.addEventListener('blur', () => { for (const p of players) p.held.clear(); if (state === 'playing') togglePause(); });
 
@@ -557,7 +744,7 @@
   const padStart = [false, false];
   function pollPads() {
     const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : [];
-    pads.slice(0, 2).forEach((pad, i) => {
+    pads.slice(0, cpu() ? 1 : 2).forEach((pad, i) => {
       const now = new Set();
       for (const [b, action] of Object.entries(PAD)) if (pad.buttons[b] && pad.buttons[b].pressed) now.add(action);
       if (pad.axes[0] < -0.5) now.add('left');
@@ -659,7 +846,7 @@
       // Both boards speed up together: one level every 20 seconds.
       const gravity = gravityFor(Math.min(15, 1 + Math.floor(elapsed / 20000)));
       for (const p of players) {
-        repeat(p, delta);
+        if (p.i === 1 && cpu()) bot.update(delta); else repeat(p, delta);
         if (state !== 'playing') break; // a hard drop just ended the round
         p.core.tick(delta, gravity);
         if (p.flash > 0) p.flash -= delta;
@@ -670,6 +857,7 @@
     if (state === 'playing' || state === 'countdown') requestAnimationFrame(loop);
   }
 
+  applyOpponent();
   draw();
   showOverlay('TWO PLAYER', `First to ${WIN_TARGET} rounds. Clear lines to send garbage.`, 'Start match');
 })();

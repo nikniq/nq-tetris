@@ -53,6 +53,16 @@
         <div class="overlay-box">
           <h2 id="vs-title">TWO PLAYER</h2>
           <p id="vs-text">First to 3 rounds. Clear lines to send garbage.</p>
+          <div id="vs-options">
+            <div class="modes" role="radiogroup" aria-label="Opponent">
+              @foreach (['human' => '2 Players', 'easy' => 'CPU Easy', 'normal' => 'CPU Normal', 'hard' => 'CPU Hard'] as $key => $label)
+                <label class="mode">
+                  <input type="radio" name="opponent" value="{{ $key }}" {{ $key === 'human' ? 'checked' : '' }} />
+                  <span>{{ $label }}</span>
+                </label>
+              @endforeach
+            </div>
+          </div>
           <div class="overlay-actions"><button id="vs-start" type="button">Start match</button></div>
           <p class="overlay-hint"><kbd>P</kbd> or <kbd>Esc</kbd> pause · <kbd>M</kbd> mute</p>
         </div>
@@ -67,6 +77,7 @@
         <li>Incoming garbage waits in the red meter beside your board. Clearing lines cancels it. If you place a piece without clearing, it rises.</li>
         <li>The speed increases every 20 seconds. Whoever tops out loses the round. First to three rounds wins the match.</li>
       </ul>
+      <p class="hint">No second player? Pick a CPU level on the start screen and play the computer. Against the computer you can use either set of keys.</p>
       <p class="hint" id="vs-pads">Two controllers work too: the first is Player 1, the second is Player 2. Some keyboards cannot register many keys at once; if moves get dropped, use a controller for one player.</p>
       <p class="hint vs-small-note">This mode needs a keyboard or controllers, and works best on a wide screen.</p>
     </div>

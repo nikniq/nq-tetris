@@ -9,7 +9,7 @@ const path = require('path');
 
 global.window = {};
 eval(fs.readFileSync(path.join(__dirname, '../../public_html/js/versus.js'), 'utf8'));
-const { Core, TOTAL, COLS, GARBAGE, emptyBoard, makePiece, gravityFor } = window.Versus;
+const { Core, Bot, placements, TOTAL, COLS, GARBAGE, emptyBoard, makePiece, gravityFor } = window.Versus;
 
 const assert = (c, m) => { if (!c) { console.error('FAIL: ' + m); process.exit(1); } };
 const ok = name => console.log('ok  ' + name);
@@ -138,6 +138,81 @@ const garbageRows = core => core.board.filter(r => r.includes(GARBAGE)).length;
   b.tick(400, 1000); assert(b.pieces === pieces, 'a resting piece does not lock before the delay');
   b.tick(200, 1000); assert(b.pieces === pieces + 1, 'it locks once the delay has passed');
   ok('shared pieces, hold, gravity, lock delay');
+}
+
+// Seeded random numbers so the computer's games are repeatable.
+function seeded(seed) {
+  return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+}
+function bagOrder(rand) {
+  const seq = [];
+  return i => {
+    while (seq.length <= i) {
+      const bag = [1, 2, 3, 4, 5, 6, 7];
+      for (let k = 6; k > 0; k--) { const j = Math.floor(rand() * (k + 1)); [bag[k], bag[j]] = [bag[j], bag[k]]; }
+      seq.push(...bag);
+    }
+    return seq[i];
+  };
+}
+// Two computers against each other, stepped 16 ms at a time.
+function botMatch(levelA, levelB, seed, maxMs = 240000) {
+  const rand = seeded(seed);
+  const order = bagOrder(rand);
+  const cores = [], lost = [false, false];
+  for (const i of [0, 1]) {
+    cores[i] = new Core({ nextType: order, random: rand, onAttack: n => cores[1 - i].receive(n), onTopOut: () => { lost[i] = true; }, onEvent() {} });
+  }
+  cores.forEach(c => c.start());
+  const bots = [new Bot(cores[0], levelA, rand), new Bot(cores[1], levelB, rand)];
+  let t = 0;
+  for (; t < maxMs && !lost[0] && !lost[1]; t += 16) {
+    const g = gravityFor(Math.min(15, 1 + Math.floor(t / 20000)));
+    for (const i of [0, 1]) { if (lost[0] || lost[1]) break; bots[i].update(16); cores[i].tick(16, g); }
+  }
+  return { winner: lost[0] ? 1 : lost[1] ? 0 : -1, cores, t };
+}
+
+// 7. the computer finds every column and plays through the normal controls
+{
+  const spots = placements(emptyBoard(), 1);
+  assert(spots.length === 7 + 10, 'an I piece has 7 flat and 10 upright spots on an empty board, got ' + spots.length);
+  assert(placements(emptyBoard(), 4).length === 9, 'an O piece has 9 spots');
+
+  const { a, log } = match();
+  fill(a, 4, 7); a.board[bottom - 4][0] = 3;
+  const bot = new Bot(a, 'hard', () => 0.99);
+  for (let ms = 0; ms < 3000 && a.pieces < 2; ms += 16) bot.update(16);
+  assert(log[0].includes(4), 'given a well, the computer takes the tetris within two pieces');
+  ok('computer finds placements and takes a tetris');
+}
+
+// 8. alone, the computer survives and keeps its stack low
+{
+  const rand = seeded(7);
+  const core = new Core({ nextType: bagOrder(rand), random: rand, onAttack() {}, onTopOut() {}, onEvent() {} });
+  core.start();
+  const bot = new Bot(core, 'normal', rand);
+  for (let ms = 0; ms < 180000 && core.alive; ms += 16) { bot.update(16); core.tick(16, gravityFor(3)); }
+  assert(core.alive, 'normal computer survived three minutes alone');
+  assert(core.lines > 80, 'and cleared plenty of lines: ' + core.lines);
+  ok('computer survives alone (' + core.pieces + ' pieces, ' + core.lines + ' lines)');
+}
+
+// 9. the levels are ordered: harder beats easier
+{
+  let hardOverEasy = 0, normalOverEasy = 0, hardOverNormal = 0;
+  const games = 8;
+  for (let s = 1; s <= games; s++) {
+    if (botMatch('hard', 'easy', s * 11).winner === 0) hardOverEasy++;
+    if (botMatch('easy', 'normal', s * 13).winner === 1) normalOverEasy++;
+    if (botMatch('hard', 'normal', s * 17).winner === 0) hardOverNormal++;
+  }
+  console.log(`    hard beat easy ${hardOverEasy}/${games}, normal beat easy ${normalOverEasy}/${games}, hard beat normal ${hardOverNormal}/${games}`);
+  assert(hardOverEasy >= games - 1, 'hard nearly always beats easy');
+  assert(normalOverEasy >= games - 2, 'normal usually beats easy');
+  assert(hardOverNormal > games / 2, 'hard beats normal more often than not');
+  ok('difficulty levels are ordered');
 }
 
 console.log('\nALL PASSED');
